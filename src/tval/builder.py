@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from graphlib import CycleError, TopologicalSorter
+from itertools import chain
 
 import duckdb
 
@@ -73,31 +74,26 @@ def build_load_order(table_defs: list[TableDef]) -> list[TableDef]:
 def build_create_table_sql(tdef: TableDef) -> str:
     """Generate a CREATE TABLE SQL statement from a table definition."""
     table_name = quote_identifier(tdef.table.name)
-    parts: list[str] = []
-
-    for col in tdef.columns:
-        col_def = f"    {quote_identifier(col.name)} {col.type}"
-        if col.not_null:
-            col_def += " NOT NULL"
-        parts.append(col_def)
-
-    for pk in tdef.table_constraints.primary_key:
-        cols = ", ".join(quote_identifier(c) for c in pk.columns)
-        parts.append(f"    PRIMARY KEY ({cols})")
-
-    for uq in tdef.table_constraints.unique:
-        cols = ", ".join(quote_identifier(c) for c in uq.columns)
-        parts.append(f"    UNIQUE ({cols})")
-
-    for fk in tdef.table_constraints.foreign_keys:
-        src_cols = ", ".join(quote_identifier(c) for c in fk.columns)
-        ref_table = quote_identifier(fk.references.table)
-        ref_cols = ", ".join(quote_identifier(c) for c in fk.references.columns)
-        parts.append(
-            f"    FOREIGN KEY ({src_cols}) REFERENCES {ref_table} ({ref_cols})"
-        )
-
-    body = ",\n".join(parts)
+    col_defs = (
+        f"    {quote_identifier(col.name)} {col.type}"
+        + (" NOT NULL" if col.not_null else "")
+        for col in tdef.columns
+    )
+    pk_defs = (
+        f"    PRIMARY KEY ({', '.join(quote_identifier(c) for c in pk.columns)})"
+        for pk in tdef.table_constraints.primary_key
+    )
+    uq_defs = (
+        f"    UNIQUE ({', '.join(quote_identifier(c) for c in uq.columns)})"
+        for uq in tdef.table_constraints.unique
+    )
+    fk_defs = (
+        f"    FOREIGN KEY ({', '.join(quote_identifier(c) for c in fk.columns)})"
+        f" REFERENCES {quote_identifier(fk.references.table)}"
+        f" ({', '.join(quote_identifier(c) for c in fk.references.columns)})"
+        for fk in tdef.table_constraints.foreign_keys
+    )
+    body = ",\n".join(chain(col_defs, pk_defs, uq_defs, fk_defs))
     return f"CREATE TABLE {table_name} (\n{body}\n)"
 
 

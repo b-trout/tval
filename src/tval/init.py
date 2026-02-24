@@ -55,10 +55,7 @@ def run_init(target_dir: str = "./tval") -> None:
     if gitignore_path.exists():
         existing_lines = set(gitignore_path.read_text(encoding="utf-8").splitlines())
 
-    entries_to_add: list[str] = []
-    for entry in GITIGNORE_ENTRIES:
-        if entry not in existing_lines:
-            entries_to_add.append(entry)
+    entries_to_add = [e for e in GITIGNORE_ENTRIES if e not in existing_lines]
 
     if entries_to_add:
         with open(gitignore_path, "a", encoding="utf-8") as f:
