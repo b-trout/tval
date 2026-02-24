@@ -11,7 +11,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _setup_project(tmp_path: Path) -> Path:
-    """テスト用のプロジェクト構造をtmp_pathにコピーする。"""
+    """テスト用のプロジェクト構造をtmp_pathにコピーし、パスを絶対パスに書き換える。"""
     tval_dir = tmp_path / "tval"
     tval_dir.mkdir()
 
@@ -30,8 +30,8 @@ def _setup_project(tmp_path: Path) -> Path:
     for yaml_file in schema_dir.glob("*.yaml"):
         with open(yaml_file, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
-        src = doc["table"]["source_dir"]
-        doc["table"]["source_dir"] = str((tval_dir / src).resolve())
+        src_rel = doc["table"]["source_dir"]
+        doc["table"]["source_dir"] = str((tval_dir / src_rel).resolve())
         with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(doc, f, allow_unicode=True)
 

@@ -37,11 +37,13 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # 2. パスをconfig.yamlの親ディレクトリ基準で解決
+    # 2. project_root（セキュリティ用: source_dirのパストラバーサル防止）
     project_root = Path(config_path).resolve().parent
-    db_path = project_root / config["database_path"]
-    schema_dir = project_root / config["schema_dir"]
-    output_path_cfg = project_root / config["output_path"]
+
+    # config内のパスはそのまま使用（CLIのCWDまたは絶対パス基準）
+    db_path = Path(config["database_path"])
+    schema_dir = config["schema_dir"]
+    output_path = config["output_path"]
 
     # database_pathの拡張子検証
     if db_path.suffix != ".duckdb":
@@ -50,7 +52,7 @@ def run(config_path: str | None = None, export: bool = False) -> None:
         )
 
     # 3. スキーマYAML読み込み
-    table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
+    table_defs = load_table_definitions(schema_dir, project_root=project_root)
 
     # 4. DAGによるロード順決定
     ordered_defs = build_load_order(table_defs)
@@ -97,7 +99,7 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     # 8. エクスポート
     if export:
         all_ok = all(r.overall_status == "OK" for r in table_reports)
-        output_base_dir = output_path_cfg.parent / "parquet"
+        output_base_dir = Path(output_path).parent / "parquet"
         conn_ro = duckdb.connect(str(db_path), read_only=True)
         for report, tdef in zip(table_reports, ordered_defs):
             if not all_ok:
@@ -112,10 +114,10 @@ def run(config_path: str | None = None, export: bool = False) -> None:
         conn_ro.close()
 
     # 9. レポート生成
-    output_path_cfg.parent.mkdir(parents=True, exist_ok=True)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     generate_report(
         table_reports=table_reports,
-        output_path=str(output_path_cfg),
+        output_path=output_path,
         db_path=str(db_path),
         executed_at=datetime.now().isoformat(),
     )
