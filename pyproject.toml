@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "tval"
 version = "0.1.0"
 description = "Table data validator for pre-analysis data validation"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "duckdb",
     "pydantic",
@@ -32,12 +32,12 @@ tval = "tval.cli:main"
 packages = ["src/tval"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 strict = true
