@@ -20,6 +20,8 @@ dev = [
     "pytest",
     "ruff",
     "mypy",
+    "types-pyyaml",
+    "types-chardet",
 ]
 
 [project.scripts]
