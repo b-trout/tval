@@ -1,3 +1,9 @@
+"""Structured JSON logging for tval.
+
+Provides a JSON formatter that outputs log records as single-line JSON objects
+with extra fields from the log record.
+"""
+
 from __future__ import annotations
 
 import json
@@ -34,7 +40,10 @@ _RESERVED = {
 
 
 class JsonFormatter(logging.Formatter):
+    """Log formatter that outputs records as single-line JSON objects."""
+
     def format(self, record: logging.LogRecord) -> str:
+        """Format a log record as a JSON string with timestamp, level, module, and extras."""
         log: dict[str, object] = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
             "level": record.levelname,
@@ -50,6 +59,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def get_logger(name: str) -> logging.Logger:
+    """Return a logger configured with JSON formatting."""
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler()
