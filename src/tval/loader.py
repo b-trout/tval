@@ -120,10 +120,14 @@ def _build_columns_override(tdef: TableDef) -> str:
     if not format_cols:
         return ""
 
-    return "{" + ", ".join(
-        f"'{col.name}': '{'VARCHAR' if col.name in format_cols else col.type}'"
-        for col in tdef.columns
-    ) + "}"
+    return (
+        "{"
+        + ", ".join(
+            f"'{col.name}': '{'VARCHAR' if col.name in format_cols else col.type}'"
+            for col in tdef.columns
+        )
+        + "}"
+    )
 
 
 def parse_duckdb_error(file_path: str, message: str) -> LoadError:
