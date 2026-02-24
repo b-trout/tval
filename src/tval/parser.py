@@ -50,7 +50,8 @@ class ColumnDef(BaseModel):
             base_type = self.type.split("(")[0].strip()
             if base_type not in DATETIME_TYPES:
                 raise ValueError(
-                    f"format は DATE/TIMESTAMP/TIME 型のみ有効です: type={self.type}"
+                    "format is only valid for DATE/TIMESTAMP/TIME types: "
+                    f"type={self.type}"
                 )
         return self
 
@@ -137,14 +138,14 @@ class TableDef(BaseModel):
         obj: TableDef = handler(values)
 
         if len(obj.columns) == 0:
-            raise ValueError("columns は1件以上必要です")
+            raise ValueError("At least one column is required")
 
         col_names = {c.name for c in obj.columns}
 
         # Validate source_dir existence
         source_dir = Path(obj.table.source_dir)
         if not source_dir.exists():
-            raise ValueError(f"source_dir が存在しません: {obj.table.source_dir}")
+            raise ValueError(f"source_dir does not exist: {obj.table.source_dir}")
 
         # Validate source_dir is within project root
         context = info.context or {}
@@ -156,40 +157,31 @@ class TableDef(BaseModel):
                 resolved.relative_to(root_resolved)
             except ValueError:
                 raise ValueError(
-                    f"source_dir はプロジェクトルート以下である必要があります: "
-                    f"{obj.table.source_dir}"
+                    f"source_dir must be under the project root: {obj.table.source_dir}"
                 )
 
         # Validate PK columns exist
         for pk in obj.table_constraints.primary_key:
             for col in pk.columns:
                 if col not in col_names:
-                    raise ValueError(
-                        f"primary_key に存在しないカラムが指定されています: {col}"
-                    )
+                    raise ValueError(f"Column not found in primary_key: {col}")
 
         # Validate UNIQUE columns exist
         for uq in obj.table_constraints.unique:
             for col in uq.columns:
                 if col not in col_names:
-                    raise ValueError(
-                        f"unique に存在しないカラムが指定されています: {col}"
-                    )
+                    raise ValueError(f"Column not found in unique: {col}")
 
         # Validate FK source columns exist
         for fk in obj.table_constraints.foreign_keys:
             for col in fk.columns:
                 if col not in col_names:
-                    raise ValueError(
-                        f"foreign_keys に存在しないカラムが指定されています: {col}"
-                    )
+                    raise ValueError(f"Column not found in foreign_keys: {col}")
 
         # Validate export.partition_by columns exist
         for col in obj.export.partition_by:
             if col not in col_names:
-                raise ValueError(
-                    f"export.partition_by に存在しないカラムが指定されています: {col}"
-                )
+                raise ValueError(f"Column not found in export.partition_by: {col}")
 
         return obj
 
@@ -213,7 +205,5 @@ def load_table_definitions(
     schema_path = Path(schema_dir)
     yaml_files = sorted(schema_path.glob("*.yaml"))
     if not yaml_files:
-        raise FileNotFoundError(
-            f"schema_dir にYAMLファイルが見つかりません: {schema_dir}"
-        )
+        raise FileNotFoundError(f"No YAML files found in schema_dir: {schema_dir}")
     return [load_table_definition(f, project_root=project_root) for f in yaml_files]

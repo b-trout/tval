@@ -1,21 +1,21 @@
 table:
   name: users
-  description: ユーザーテーブル
+  description: Users table
   source_dir: ./data/users/
 
 columns:
   - name: user_id
-    logical_name: ユーザーID
+    logical_name: User ID
     type: INTEGER
     not_null: true
 
   - name: name
-    logical_name: 名前
+    logical_name: Name
     type: VARCHAR
     not_null: true
 
   - name: email
-    logical_name: メールアドレス
+    logical_name: Email address
     type: VARCHAR
     not_null: true
 

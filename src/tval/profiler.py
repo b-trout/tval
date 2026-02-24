@@ -81,18 +81,18 @@ def profile_table(
     For numeric columns, includes mean, std, skewness, kurtosis, and percentiles.
     """
     table_name = tdef.table.name
-    logger.info("統計量取得開始", extra={"table": table_name})
+    logger.info("Profiling started", extra={"table": table_name})
 
     if load_errors:
-        logger.info("統計量取得完了", extra={"table": table_name})
+        logger.info("Profiling completed", extra={"table": table_name})
         return []
 
     qtable = quote_identifier(table_name)
 
-    # テーブルが空かチェック
+    # Check if table is empty
     row_count_result = conn.execute(f"SELECT COUNT(*) FROM {qtable}").fetchone()
     if not row_count_result or row_count_result[0] == 0:
-        logger.info("統計量取得完了", extra={"table": table_name})
+        logger.info("Profiling completed", extra={"table": table_name})
         return []
 
     profiles: list[ColumnProfile] = []
@@ -102,7 +102,7 @@ def profile_table(
         numeric = _is_numeric(col.type)
 
         try:
-            # 共通統計量
+            # Common statistics
             common_sql = (
                 f"SELECT COUNT(*) AS count, "
                 f"COUNT({qcol}) AS not_null_count, "
@@ -116,7 +116,7 @@ def profile_table(
             not_null_count = int(common_row[1])
             unique_count = int(common_row[2])
 
-            # 数値型追加統計量
+            # Numeric type additional statistics
             mean = None
             std = None
             skewness = None
@@ -178,12 +178,12 @@ def profile_table(
             )
         except Exception:
             logger.error(
-                "統計量取得失敗",
+                "Profiling failed",
                 extra={"table": table_name, "column": col.name},
                 exc_info=True,
             )
 
-    logger.info("統計量取得完了", extra={"table": table_name})
+    logger.info("Profiling completed", extra={"table": table_name})
     return profiles
 
 

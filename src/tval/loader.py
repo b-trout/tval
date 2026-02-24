@@ -61,7 +61,7 @@ def _resolve_csv_path(
 
     if confidence < confidence_threshold:
         raise EncodingDetectionError(
-            f"文字コード検出の信頼度が閾値未満です "
+            f"Encoding detection confidence is below threshold "
             f"(detected={encoding}, confidence={confidence:.2f}, "
             f"threshold={confidence_threshold})"
         )
@@ -70,7 +70,7 @@ def _resolve_csv_path(
         return file_path, False
 
     logger.warning(
-        "CSV文字コードをUTF-8に変換しました",
+        "Converted CSV encoding to UTF-8",
         extra={
             "file": file_path,
             "detected_encoding": encoding,
@@ -262,7 +262,7 @@ def _insert_file(
         return None
     except EncodingDetectionError as e:
         logger.error(
-            "文字コード検出の信頼度が閾値未満です",
+            "Encoding detection confidence is below threshold",
             extra={
                 "file": file_path,
                 "detected_encoding": "unknown",
@@ -280,7 +280,7 @@ def _insert_file(
     except Exception as e:
         error = parse_duckdb_error(file_path, str(e))
         logger.error(
-            "ファイルロードエラー",
+            "File load error",
             extra={
                 "table": tdef.table.name,
                 "file": file_path,
@@ -317,7 +317,7 @@ def load_files(
                 error_type="NO_FILES",
                 column=None,
                 row=None,
-                raw_message=f"ファイルが見つかりません: {source_dir}",
+                raw_message=f"No files found: {source_dir}",
             )
         ]
 
@@ -332,17 +332,17 @@ def load_files(
                     error_type="UNSUPPORTED_FORMAT",
                     column=None,
                     row=None,
-                    raw_message=f".xls形式は非対応です: {file_str}",
+                    raw_message=f".xls format is not supported: {file_str}",
                 )
             )
             continue
 
         if ext not in SUPPORTED_EXTENSIONS:
-            logger.warning("非対応拡張子をスキップ", extra={"file": file_str})
+            logger.warning("Skipping unsupported extension", extra={"file": file_str})
             continue
 
         logger.info(
-            "ファイルロード開始",
+            "File load started",
             extra={"table": tdef.table.name, "file": file_str},
         )
         error = _insert_file(conn, tdef, file_str, ext, confidence_threshold)
@@ -350,7 +350,7 @@ def load_files(
             errors.append(error)
         else:
             logger.info(
-                "ファイルロード完了",
+                "File load completed",
                 extra={"table": tdef.table.name, "file": file_str},
             )
 

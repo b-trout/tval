@@ -34,7 +34,7 @@ def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
     """Build a CheckDef that verifies column values are within the allowed set."""
     qcol = quote_identifier(col.name)
     return CheckDef(
-        description=f"{col.logical_name}（{col.name}）の許容値チェック",
+        description=f"{col.logical_name}({col.name}) allowed values check",
         query=(
             f"SELECT COUNT(*) FROM {{table}} "
             f"WHERE {qcol} NOT IN (SELECT UNNEST(?::VARCHAR[])) "
@@ -59,10 +59,10 @@ def _execute_check(
             status = "OK" if count == 0 else "NG"
         else:
             status = "OK" if count > 0 else "NG"
-        message = "" if status == "OK" else f"結果件数: {count}"
+        message = "" if status == "OK" else f"Result count: {count}"
         if status == "NG":
             logger.error(
-                "チェックNG",
+                "Check failed",
                 extra={
                     "table": table_name,
                     "check_description": check.description,
@@ -77,7 +77,7 @@ def _execute_check(
         )
     except Exception as e:
         logger.warning(
-            "チェックSKIPPED",
+            "Check skipped",
             extra={
                 "table": table_name,
                 "check_description": check.description,
@@ -103,9 +103,9 @@ def run_checks(
     Returns a tuple of (check_results, aggregation_check_results).
     """
     table_name = tdef.table.name
-    logger.info("チェック実行開始", extra={"table": table_name})
+    logger.info("Starting checks", extra={"table": table_name})
 
-    # ロードエラーがあれば全SKIPPED
+    # Skip all checks if load errors exist
     if load_errors:
         checks_results: list[CheckResult] = []
         agg_results: list[CheckResult] = []
@@ -122,7 +122,7 @@ def run_checks(
         for check in all_checks:
             query = check.query.replace("{table}", quote_identifier(table_name))
             logger.warning(
-                "チェックSKIPPED",
+                "Check skipped",
                 extra={
                     "table": table_name,
                     "check_description": check.description,
@@ -134,14 +134,14 @@ def run_checks(
                     query=query,
                     status="SKIPPED",
                     result_count=None,
-                    message="ロードエラーのためスキップ",
+                    message="Skipped due to load error",
                 )
             )
 
         for check in tdef.table_constraints.aggregation_checks:
             query = check.query.replace("{table}", quote_identifier(table_name))
             logger.warning(
-                "チェックSKIPPED",
+                "Check skipped",
                 extra={
                     "table": table_name,
                     "check_description": check.description,
@@ -153,14 +153,14 @@ def run_checks(
                     query=query,
                     status="SKIPPED",
                     result_count=None,
-                    message="ロードエラーのためスキップ",
+                    message="Skipped due to load error",
                 )
             )
 
-        logger.info("チェック実行完了", extra={"table": table_name})
+        logger.info("Checks completed", extra={"table": table_name})
         return checks_results, agg_results
 
-    # 正常ケース: チェック実行
+    # Normal case: execute checks
     checks_results = [
         _execute_check(conn, _build_allowed_values_check(table_name, col), table_name)
         for col in tdef.columns
@@ -176,5 +176,5 @@ def run_checks(
         for check in tdef.table_constraints.aggregation_checks
     ]
 
-    logger.info("チェック実行完了", extra={"table": table_name})
+    logger.info("Checks completed", extra={"table": table_name})
     return checks_results, agg_results

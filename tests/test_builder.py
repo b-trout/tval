@@ -86,7 +86,7 @@ class TestBuildLoadOrder:
                 }
             ],
         )
-        with pytest.raises(ValueError, match="循環依存"):
+        with pytest.raises(ValueError, match="Circular dependency"):
             build_load_order([a, b])
 
     def test_undefined_fk_reference_raises(self, tmp_path: Path) -> None:
@@ -104,5 +104,5 @@ class TestBuildLoadOrder:
                 }
             ],
         )
-        with pytest.raises(ValueError, match="FK参照先テーブルが未定義"):
+        with pytest.raises(ValueError, match="FK reference table is not defined"):
             build_load_order([orders])
