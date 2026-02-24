@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import chain
 
 import duckdb
 
@@ -98,11 +99,14 @@ def run_checks(
         checks_results: list[CheckResult] = []
         agg_results: list[CheckResult] = []
 
-        all_checks: list[CheckDef] = []
-        for col in tdef.columns:
-            if col.allowed_values:
-                all_checks.append(_build_allowed_values_check(table_name, col))
-        all_checks.extend(tdef.table_constraints.checks)
+        all_checks = chain(
+            (
+                _build_allowed_values_check(table_name, col)
+                for col in tdef.columns
+                if col.allowed_values
+            ),
+            tdef.table_constraints.checks,
+        )
 
         for check in all_checks:
             query = check.query.replace("{table}", quote_identifier(table_name))
@@ -146,22 +150,20 @@ def run_checks(
         return checks_results, agg_results
 
     # 正常ケース: チェック実行
-    checks_results = []
-
-    # 1. allowed_values チェック
-    for col in tdef.columns:
-        if col.allowed_values:
-            check = _build_allowed_values_check(table_name, col)
-            checks_results.append(_execute_check(conn, check, table_name))
-
-    # 2. checks
-    for check in tdef.table_constraints.checks:
-        checks_results.append(_execute_check(conn, check, table_name))
+    checks_results = [
+        _execute_check(conn, _build_allowed_values_check(table_name, col), table_name)
+        for col in tdef.columns
+        if col.allowed_values
+    ] + [
+        _execute_check(conn, check, table_name)
+        for check in tdef.table_constraints.checks
+    ]
 
     # 3. aggregation_checks
-    agg_results = []
-    for check in tdef.table_constraints.aggregation_checks:
-        agg_results.append(_execute_check(conn, check, table_name))
+    agg_results = [
+        _execute_check(conn, check, table_name)
+        for check in tdef.table_constraints.aggregation_checks
+    ]
 
     logger.info("チェック実行完了", extra={"table": table_name})
     return checks_results, agg_results

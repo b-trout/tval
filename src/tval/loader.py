@@ -11,7 +11,7 @@ import duckdb
 from .builder import quote_identifier
 from .logger import get_logger
 from .parser import DATETIME_TYPES as DATETIME_TYPES
-from .parser import TableDef
+from .parser import ColumnDef, TableDef
 
 logger = get_logger(__name__)
 
@@ -73,21 +73,24 @@ def _resolve_csv_path(
     return tmp.name, True
 
 
+def _col_expr(col: ColumnDef) -> str:
+    """Return a SELECT-clause expression for a single column.
+
+    Columns with a format specifier are wrapped in STRPTIME for parsing.
+    """
+    qname = quote_identifier(col.name)
+    if col.format:
+        fmt = col.format.replace("'", "''")
+        return f"STRPTIME({qname}, '{fmt}')::{col.type} AS {qname}"
+    return qname
+
+
 def _build_insert_select(tdef: TableDef) -> str:
     """format指定カラムがある場合は明示的なSELECTを生成する。"""
-    format_cols = {col.name: col for col in tdef.columns if col.format}
-    if not format_cols:
+    if not any(col.format for col in tdef.columns):
         return "SELECT *"
 
-    parts: list[str] = []
-    for col in tdef.columns:
-        qname = quote_identifier(col.name)
-        if col.format:
-            fmt = col.format.replace("'", "''")
-            parts.append(f"STRPTIME({qname}, '{fmt}')::{col.type} AS {qname}")
-        else:
-            parts.append(qname)
-    return "SELECT " + ", ".join(parts)
+    return "SELECT " + ", ".join(_col_expr(c) for c in tdef.columns)
 
 
 def _build_columns_override(tdef: TableDef) -> str:
@@ -96,11 +99,10 @@ def _build_columns_override(tdef: TableDef) -> str:
     if not format_cols:
         return ""
 
-    entries: list[str] = []
-    for col in tdef.columns:
-        typ = "VARCHAR" if col.name in format_cols else col.type
-        entries.append(f"'{col.name}': '{typ}'")
-    return "{" + ", ".join(entries) + "}"
+    return "{" + ", ".join(
+        f"'{col.name}': '{'VARCHAR' if col.name in format_cols else col.type}'"
+        for col in tdef.columns
+    ) + "}"
 
 
 def parse_duckdb_error(file_path: str, message: str) -> LoadError:
