@@ -1,3 +1,9 @@
+"""Profile table columns to compute descriptive statistics.
+
+Collects count, null count, unique count, and (for numeric columns) mean,
+standard deviation, skewness, kurtosis, min, percentiles, and max.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,13 +43,15 @@ NUMERIC_TYPES = {
 
 
 def _is_numeric(col_type: str) -> bool:
-    """型名の基底部分で数値型かどうかを判定する。"""
+    """Check whether a column type is numeric based on its base type name."""
     base_type = col_type.split("(")[0].strip()
     return base_type in NUMERIC_TYPES
 
 
 @dataclass
 class ColumnProfile:
+    """Descriptive statistics for a single table column."""
+
     column_name: str
     logical_name: str
     column_type: str
@@ -67,7 +75,11 @@ def profile_table(
     tdef: TableDef,
     load_errors: list[LoadError],
 ) -> list[ColumnProfile]:
-    """テーブルの全列について基本統計量を取得する。"""
+    """Compute descriptive statistics for all columns in a table.
+
+    Returns an empty list if there are load errors or the table is empty.
+    For numeric columns, includes mean, std, skewness, kurtosis, and percentiles.
+    """
     table_name = tdef.table.name
     logger.info("統計量取得開始", extra={"table": table_name})
 
@@ -176,7 +188,7 @@ def profile_table(
 
 
 def _to_float(value: object) -> float | None:
-    """値をfloatに変換する。Noneはそのまま返す。"""
+    """Convert a value to float, returning None if the input is None."""
     if value is None:
         return None
     return float(value)  # type: ignore[arg-type]
