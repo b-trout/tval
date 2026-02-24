@@ -32,17 +32,16 @@ class CheckResult:
 
 def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
     """Build a CheckDef that verifies column values are within the allowed set."""
-    escaped = ", ".join(
-        f"'{v.replace(chr(39), chr(39) * 2)}'" for v in col.allowed_values
-    )
     qcol = quote_identifier(col.name)
     return CheckDef(
         description=f"{col.logical_name}（{col.name}）の許容値チェック",
         query=(
             f"SELECT COUNT(*) FROM {{table}} "
-            f"WHERE {qcol} NOT IN ({escaped}) AND {qcol} IS NOT NULL"
+            f"WHERE {qcol} NOT IN (SELECT UNNEST(?::VARCHAR[])) "
+            f"AND {qcol} IS NOT NULL"
         ),
         expect_zero=True,
+        params=[col.allowed_values],
     )
 
 
@@ -54,7 +53,7 @@ def _execute_check(
     """Execute a single check query and return a CheckResult."""
     query = check.query.replace("{table}", quote_identifier(table_name))
     try:
-        result = conn.execute(query).fetchone()
+        result = conn.execute(query, check.params or None).fetchone()
         count = int(result[0]) if result else 0
         if check.expect_zero:
             status = "OK" if count == 0 else "NG"

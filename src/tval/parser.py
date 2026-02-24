@@ -6,6 +6,7 @@ definitions and provides functions to load them from YAML files.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,16 @@ class ColumnDef(BaseModel):
     def upper_type(cls, v: str) -> str:
         """Normalize the column type to uppercase."""
         return v.upper()
+
+    @field_validator("format")
+    @classmethod
+    def validate_format_pattern(cls, v: str | None) -> str | None:
+        """Restrict format to safe strptime-style patterns only."""
+        if v is None:
+            return v
+        if not re.fullmatch(r"[%A-Za-z0-9\-/.: ]+", v):
+            raise ValueError(f"Invalid format pattern: {v!r}")
+        return v
 
     @model_validator(mode="after")
     def validate_format_type(self) -> ColumnDef:
@@ -76,6 +87,7 @@ class CheckDef(BaseModel):
     description: str
     query: str
     expect_zero: bool = True
+    params: list[Any] = []
 
 
 class TableConstraints(BaseModel):

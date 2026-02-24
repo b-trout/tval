@@ -18,6 +18,11 @@ from .parser import TableDef
 logger = get_logger(__name__)
 
 
+def _escape_string_literal(value: str) -> str:
+    """Escape single quotes for use in a SQL string literal."""
+    return value.replace("'", "''")
+
+
 @dataclass
 class ExportResult:
     """Result of a single table export operation."""
@@ -46,7 +51,7 @@ def export_table(
             partition_cols = ", ".join(quote_identifier(c) for c in partition_by)
             output_path = str(output_dir.resolve())
             sql = (
-                f"COPY {qtable} TO '{output_path}' "
+                f"COPY {qtable} TO '{_escape_string_literal(output_path)}' "
                 f"(FORMAT parquet, PARTITION_BY ({partition_cols}), "
                 f"OVERWRITE_OR_IGNORE)"
             )
@@ -54,7 +59,8 @@ def export_table(
         else:
             output_file = output_dir / f"{table_name}.parquet"
             output_path = str(output_file.resolve())
-            sql = f"COPY {qtable} TO '{output_path}' (FORMAT parquet)"
+            escaped_path = _escape_string_literal(output_path)
+            sql = f"COPY {qtable} TO '{escaped_path}' (FORMAT parquet)"
             conn.execute(sql)
 
         return ExportResult(
