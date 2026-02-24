@@ -2,6 +2,7 @@
 
 **Table data schema validator** - Validate CSV, Excel, and Parquet files against YAML-defined schemas using DuckDB.
 
+[![PyPI version](https://img.shields.io/pypi/v/tval)](https://pypi.org/project/tval/)
 ![Python >= 3.10](https://img.shields.io/badge/Python-%3E%3D3.10-blue)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 ![CI](https://img.shields.io/badge/CI-passing-brightgreen)
@@ -9,7 +10,7 @@
 ## Quick Start
 
 ```bash
-pip install -e .              # Install tval
+pip install tval              # Install tval
 tval init                     # Scaffold project skeleton
 # Place YAML schemas in tval/schema/ and data files in tval/data/
 tval run                      # Run validation and generate report
@@ -192,13 +193,21 @@ tval/
 Using uv (recommended):
 
 ```bash
-uv pip install -e .
+uv pip install tval
 ```
 
 Using pip:
 
 ```bash
-pip install -e .
+pip install tval
+```
+
+For development (editable install):
+
+```bash
+git clone https://github.com/b-trout/tval.git
+cd tval
+pip install -e ".[dev]"
 ```
 
 ### 3.3 Initialize a Project

@@ -1,12 +1,26 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "tval"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Table data validator for pre-analysis data validation"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+authors = [{ name = "b-trout" }]
+keywords = ["validation", "csv", "excel", "parquet", "duckdb", "data-quality"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
 dependencies = [
     "duckdb",
     "pydantic",
@@ -25,8 +39,19 @@ dev = [
     "types-chardet",
 ]
 
+[project.urls]
+Homepage = "https://github.com/b-trout/tval"
+Repository = "https://github.com/b-trout/tval"
+Issues = "https://github.com/b-trout/tval/issues"
+
 [project.scripts]
 tval = "tval.cli:main"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/tval/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tval"]
