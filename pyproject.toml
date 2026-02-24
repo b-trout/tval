@@ -3,7 +3,7 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tval"
+name = "tval-cli"
 dynamic = ["version"]
 description = "Table data validator for pre-analysis data validation"
 readme = "README.md"
