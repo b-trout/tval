@@ -1,3 +1,9 @@
+"""Load data files (CSV, XLSX, Parquet) into DuckDB tables.
+
+Handles character encoding detection for CSV files, datetime format conversion,
+and structured error reporting for load failures.
+"""
+
 from __future__ import annotations
 
 import re
@@ -19,11 +25,13 @@ SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".parquet"}
 
 
 class EncodingDetectionError(Exception):
-    """chardetの信頼度が閾値未満の場合に送出する。"""
+    """Raised when chardet's confidence is below the configured threshold."""
 
 
 @dataclass
 class LoadError:
+    """Structured representation of a file load error."""
+
     file_path: str
     error_type: str
     column: str | None
@@ -35,7 +43,15 @@ def _resolve_csv_path(
     file_path: str,
     confidence_threshold: float,
 ) -> tuple[str, bool]:
-    """CSVファイルの文字コードを検出し、必要に応じてUTF-8変換する。"""
+    """Detect CSV encoding and convert to UTF-8 if needed.
+
+    Returns a tuple of (resolved_path, is_temporary). If the file is already
+    UTF-8/ASCII, returns the original path. Otherwise, creates a temporary
+    UTF-8 copy.
+
+    Raises:
+        EncodingDetectionError: If detection confidence is below the threshold.
+    """
     with open(file_path, "rb") as f:
         raw = f.read()
 
@@ -74,7 +90,7 @@ def _resolve_csv_path(
 
 
 def _build_insert_select(tdef: TableDef) -> str:
-    """format指定カラムがある場合は明示的なSELECTを生成する。"""
+    """Build a SELECT clause with STRPTIME conversions for format-specified columns."""
     format_cols = {col.name: col for col in tdef.columns if col.format}
     if not format_cols:
         return "SELECT *"
@@ -91,7 +107,11 @@ def _build_insert_select(tdef: TableDef) -> str:
 
 
 def _build_columns_override(tdef: TableDef) -> str:
-    """read_csv_auto/read_xlsxのcolumnsパラメータ文字列を生成する。"""
+    """Build a columns/types override string for read_csv_auto or read_xlsx.
+
+    Columns with a format specifier are overridden to VARCHAR so that
+    STRPTIME can parse them in the SELECT clause.
+    """
     format_cols = {col.name for col in tdef.columns if col.format}
     if not format_cols:
         return ""
@@ -104,7 +124,12 @@ def _build_columns_override(tdef: TableDef) -> str:
 
 
 def parse_duckdb_error(file_path: str, message: str) -> LoadError:
-    """DuckDBエラーメッセージを構造化する。"""
+    """Parse a DuckDB error message into a structured LoadError.
+
+    Recognizes TYPE_MISMATCH, NOT_NULL, COLUMN_MISMATCH, FK_VIOLATION,
+    and UNIQUE_VIOLATION patterns. Unrecognized errors are classified as
+    UNKNOWN.
+    """
     # TYPE_MISMATCH
     m = re.search(
         r"Could not convert .+ to (\w+) in column \"(\w+)\".+Row: (\d+)",
@@ -186,7 +211,7 @@ def _insert_file(
     ext: str,
     confidence_threshold: float,
 ) -> LoadError | None:
-    """1ファイルをテーブルにINSERTする。"""
+    """Insert a single data file into the corresponding DuckDB table."""
     table_name = quote_identifier(tdef.table.name)
     select_clause = _build_insert_select(tdef)
     columns_override = _build_columns_override(tdef)
@@ -266,7 +291,11 @@ def load_files(
     tdef: TableDef,
     confidence_threshold: float = 0.8,
 ) -> list[LoadError]:
-    """source_dir以下のファイルを1件ずつINSERTし、エラーリストを返す。"""
+    """Load all data files from the table's source directory.
+
+    Iterates over files in source_dir, inserting each supported file into
+    the table. Returns a list of LoadError instances for any failures.
+    """
     source_dir = Path(tdef.table.source_dir)
     errors: list[LoadError] = []
 
