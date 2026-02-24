@@ -16,3 +16,14 @@ dev = [
     "ruff",
     "mypy",
 ]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
