@@ -117,6 +117,16 @@ mypy src/
 ```
 
 エラーが出た場合は修正してから再実行すること。`# noqa`・`# type: ignore`による握り潰しは原則禁止。
+
+### pre-commit フック
+
+`pre-commit` フレームワークにより上記チェックを `git commit` 時に自動実行する。
+初回セットアップ:
+
+```bash
+uv sync --extra dev
+uv run pre-commit install
+```
 どうしても必要な場合はインラインコメントで理由を明記すること。
 
 ### `pyproject.toml`への設定追加

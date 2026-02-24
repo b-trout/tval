@@ -23,12 +23,11 @@ WORKDIR /home/${USERNAME}/workspace
 # Create virtual environment and install dependencies
 COPY pyproject.toml .
 COPY src/tval/__init__.py src/tval/__init__.py
-COPY scripts/pre-commit.sh scripts/pre-commit.sh
+COPY .pre-commit-config.yaml .
 RUN uv sync --extra dev
 ENV VIRTUAL_ENV=/home/${USERNAME}/workspace/.venv
 ENV PATH="/home/${USERNAME}/workspace/.venv/bin:${PATH}"
 
 # Install pre-commit hook
 RUN git init /home/${USERNAME}/workspace 2>/dev/null; \
-    cp scripts/pre-commit.sh /home/${USERNAME}/workspace/.git/hooks/pre-commit && \
-    chmod +x /home/${USERNAME}/workspace/.git/hooks/pre-commit
+    uv run pre-commit install
