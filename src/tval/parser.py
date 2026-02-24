@@ -121,7 +121,7 @@ class TableDef(BaseModel):
     @model_validator(mode="wrap")
     @classmethod
     def validate_all(cls, values: Any, handler: Any, info: ValidationInfo) -> TableDef:
-        """Validate cross-field constraints: columns, source_dir, PK, FK, unique, and export."""
+        """Validate cross-field constraints."""
         obj: TableDef = handler(values)
 
         if len(obj.columns) == 0:
