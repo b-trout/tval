@@ -58,7 +58,8 @@ def build_load_order(table_defs: list[TableDef]) -> list[TableDef]:
             ref_table = fk.references.table
             if ref_table not in name_to_def:
                 raise ValueError(
-                    f"FK参照先テーブルが未定義です: {tdef.table.name} -> {ref_table}"
+                    f"FK reference table is not defined: "
+                    f"{tdef.table.name} -> {ref_table}"
                 )
             graph[tdef.table.name].add(ref_table)
 
@@ -66,7 +67,7 @@ def build_load_order(table_defs: list[TableDef]) -> list[TableDef]:
     try:
         ordered_names = list(sorter.static_order())
     except CycleError as e:
-        raise ValueError(f"循環依存が検出されました: {e.args[1]}") from e
+        raise ValueError(f"Circular dependency detected: {e.args[1]}") from e
 
     return [name_to_def[name] for name in ordered_names]
 
@@ -103,4 +104,4 @@ def create_tables(conn: duckdb.DuckDBPyConnection, table_defs: list[TableDef]) -
     for tdef in ordered:
         sql = build_create_table_sql(tdef)
         conn.execute(sql)
-        logger.info("テーブル作成", extra={"table": tdef.table.name})
+        logger.info("Creating table", extra={"table": tdef.table.name})

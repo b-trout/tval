@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tval バリデーションレポート</title>
+<title>tval Validation Report</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
@@ -30,14 +30,14 @@
 </head>
 <body>
 <div class="container">
-  <h1>tval バリデーションレポート</h1>
+  <h1>tval Validation Report</h1>
 
   <div class="summary">
-    <div class="meta">実行日時: {{ executed_at }}</div>
-    <div class="meta">データベース: {{ db_path }}</div>
+    <div class="meta">Executed at: {{ executed_at }}</div>
+    <div class="meta">Database: {{ db_path }}</div>
     <div class="summary-grid">
       <div class="summary-item">
-        <div class="label">テーブル数</div>
+        <div class="label">Tables</div>
         <div class="value">{{ summary.total }}</div>
       </div>
       <div class="summary-item">
@@ -63,11 +63,11 @@
     </h2>
 
     {# Load Errors #}
-    <h3>ファイルロード結果</h3>
+    <h3>File Load Results</h3>
     {% if report.load_errors %}
     <table>
       <thead>
-        <tr><th>ファイル</th><th>エラー種別</th><th>カラム</th><th>行</th><th>メッセージ</th></tr>
+        <tr><th>File</th><th>Error Type</th><th>Column</th><th>Row</th><th>Message</th></tr>
       </thead>
       <tbody>
         {% for err in report.load_errors %}
@@ -82,15 +82,15 @@
       </tbody>
     </table>
     {% else %}
-    <p class="status-ok">全ファイル正常ロード</p>
+    <p class="status-ok">All files loaded successfully</p>
     {% endif %}
 
     {# Checks #}
     {% if report.check_results %}
-    <h3>ロジックバリデーション (checks)</h3>
+    <h3>Logic Validation (checks)</h3>
     <table>
       <thead>
-        <tr><th>チェック内容</th><th>ステータス</th><th>件数</th><th>メッセージ</th></tr>
+        <tr><th>Check</th><th>Status</th><th>Count</th><th>Message</th></tr>
       </thead>
       <tbody>
         {% for cr in report.check_results %}
@@ -111,10 +111,10 @@
 
     {# Aggregation Checks #}
     {% if report.agg_check_results %}
-    <h3>集計バリデーション (aggregation_checks)</h3>
+    <h3>Aggregation Validation (aggregation_checks)</h3>
     <table>
       <thead>
-        <tr><th>チェック内容</th><th>ステータス</th><th>件数</th><th>メッセージ</th></tr>
+        <tr><th>Check</th><th>Status</th><th>Count</th><th>Message</th></tr>
       </thead>
       <tbody>
         {% for cr in report.agg_check_results %}
@@ -135,14 +135,14 @@
 
     {# Profiles #}
     {% if report.profiles %}
-    <h3>基本統計量</h3>
+    <h3>Descriptive Statistics</h3>
     <table>
       <thead>
         <tr>
-          <th>カラム</th><th>論理名</th><th>型</th>
-          <th>件数</th><th>NOT NULL</th><th>ユニーク</th>
-          <th>平均</th><th>標準偏差</th><th>歪度</th><th>尖度</th>
-          <th>最小</th><th>P25</th><th>中央値</th><th>P75</th><th>最大</th>
+          <th>Column</th><th>Logical Name</th><th>Type</th>
+          <th>Count</th><th>NOT NULL</th><th>Unique</th>
+          <th>Mean</th><th>Std Dev</th><th>Skewness</th><th>Kurtosis</th>
+          <th>Min</th><th>P25</th><th>Median</th><th>P75</th><th>Max</th>
         </tr>
       </thead>
       <tbody>
@@ -176,10 +176,10 @@
 
     {# Export Result #}
     {% if report.export_result %}
-    <h3>エクスポート結果</h3>
+    <h3>Export Results</h3>
     <table>
       <thead>
-        <tr><th>ステータス</th><th>出力先</th><th>メッセージ</th></tr>
+        <tr><th>Status</th><th>Output Path</th><th>Message</th></tr>
       </thead>
       <tbody>
         <tr>

@@ -77,5 +77,7 @@ class TestResolveCsvPath:
         """Low-confidence encoding detection should raise EncodingDetectionError."""
         csv_file = tmp_path / "test.csv"
         csv_file.write_bytes(b"\x80\x81\x82\x83\x84\x85")
-        with pytest.raises(EncodingDetectionError, match="信頼度が閾値未満"):
+        with pytest.raises(
+            EncodingDetectionError, match="confidence is below threshold"
+        ):
             _resolve_csv_path(str(csv_file), confidence_threshold=0.99)

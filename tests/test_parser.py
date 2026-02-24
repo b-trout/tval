@@ -35,19 +35,19 @@ def _valid_data(data_dir: Path) -> dict[str, object]:
     return {
         "table": {
             "name": "users",
-            "description": "ユーザーテーブル",
+            "description": "Users table",
             "source_dir": str(data_dir),
         },
         "columns": [
             {
                 "name": "user_id",
-                "logical_name": "ユーザーID",
+                "logical_name": "User ID",
                 "type": "INTEGER",
                 "not_null": True,
             },
             {
                 "name": "name",
-                "logical_name": "名前",
+                "logical_name": "Name",
                 "type": "VARCHAR",
                 "not_null": True,
             },
@@ -84,7 +84,7 @@ class TestParserValid:
         data = _valid_data(data_dir)
         data["columns"][1] = {  # type: ignore[index]
             "name": "status",
-            "logical_name": "ステータス",
+            "logical_name": "Status",
             "type": "VARCHAR",
             "not_null": True,
             "allowed_values": ["active", "inactive"],
@@ -116,7 +116,7 @@ class TestParserInvalid:
             project_root / "nonexistent"
         )
         path = _make_yaml(tmp_path, data)
-        with pytest.raises(ValidationError, match="source_dir が存在しません"):
+        with pytest.raises(ValidationError, match="source_dir does not exist"):
             load_table_definition(path, project_root=project_root)
 
     def test_source_dir_outside_project(
@@ -129,7 +129,7 @@ class TestParserInvalid:
         data["table"]["source_dir"] = str(outside)  # type: ignore[index]
         path = _make_yaml(tmp_path, data)
         with pytest.raises(
-            ValidationError, match="source_dir はプロジェクトルート以下"
+            ValidationError, match="source_dir must be under the project root"
         ):
             load_table_definition(path, project_root=project_root)
 
@@ -142,7 +142,7 @@ class TestParserInvalid:
             "columns": ["nonexistent"]
         }
         path = _make_yaml(tmp_path, data)
-        with pytest.raises(ValidationError, match="primary_key に存在しないカラム"):
+        with pytest.raises(ValidationError, match="Column not found in primary_key"):
             load_table_definition(path, project_root=project_root)
 
     def test_export_partition_by_nonexistent_column(
@@ -153,7 +153,7 @@ class TestParserInvalid:
         data["export"] = {"partition_by": ["nonexistent"]}
         path = _make_yaml(tmp_path, data)
         with pytest.raises(
-            ValidationError, match="export.partition_by に存在しないカラム"
+            ValidationError, match="Column not found in export.partition_by"
         ):
             load_table_definition(path, project_root=project_root)
 
@@ -164,14 +164,14 @@ class TestParserInvalid:
         data = _valid_data(data_dir)
         data["columns"][0] = {  # type: ignore[index]
             "name": "user_id",
-            "logical_name": "ユーザーID",
+            "logical_name": "User ID",
             "type": "INTEGER",
             "not_null": True,
             "format": "%Y-%m-%d",
         }
         path = _make_yaml(tmp_path, data)
         with pytest.raises(
-            ValidationError, match="format は DATE/TIMESTAMP/TIME 型のみ有効"
+            ValidationError, match="format is only valid for DATE/TIMESTAMP/TIME types"
         ):
             load_table_definition(path, project_root=project_root)
 
@@ -183,7 +183,7 @@ class TestParserInvalid:
         data["columns"].append(  # type: ignore[union-attr]
             {
                 "name": "created_at",
-                "logical_name": "作成日",
+                "logical_name": "Created date",
                 "type": "DATE",
                 "not_null": False,
                 "format": "%Y/%m/%d",

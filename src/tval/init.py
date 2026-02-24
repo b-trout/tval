@@ -31,25 +31,25 @@ def run_init(target_dir: str = "./tval") -> None:
     target = Path(target_dir)
 
     if target.exists():
-        print(f"エラー: {target} はすでに存在します。上書きは行いません。")  # noqa: T201
+        print(f"Error: {target} already exists. Will not overwrite.")  # noqa: T201
         raise SystemExit(1)
 
-    # ディレクトリ作成
+    # Create directories
     target.mkdir(parents=True)
     (target / "schema").mkdir()
     (target / "data").mkdir()
     (target / "output").mkdir()
 
-    # .gitkeep配置
+    # Place .gitkeep files
     for subdir in ["schema", "data", "output"]:
         (target / subdir / ".gitkeep").touch()
 
-    # config.yaml生成
+    # Generate config.yaml
     (target / "config.yaml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
 
-    print(f"✅ {target}/ を作成しました")  # noqa: T201
+    print(f"Created {target}/")  # noqa: T201
 
-    # .gitignore追記
+    # Append to .gitignore
     gitignore_path = Path(".gitignore")
     existing_lines: set[str] = set()
     if gitignore_path.exists():
@@ -60,11 +60,11 @@ def run_init(target_dir: str = "./tval") -> None:
     if entries_to_add:
         with open(gitignore_path, "a", encoding="utf-8") as f:
             f.write("\n" + "\n".join(entries_to_add) + "\n")
-        print("✅ .gitignore に tval/data/, tval/output/ を追記しました")  # noqa: T201
+        print("Appended tval/data/, tval/output/ to .gitignore")  # noqa: T201
 
     print(  # noqa: T201
-        "\n次のステップ:\n"
-        "  1. tval/schema/ にテーブル定義YAMLを追加してください\n"
-        "  2. tval/data/ に受領データを配置してください\n"
-        "  3. tval run で バリデーションを実行してください"
+        "\nNext steps:\n"
+        "  1. Add table definition YAML files to tval/schema/\n"
+        "  2. Place your data files in tval/data/\n"
+        "  3. Run validation with: tval run"
     )

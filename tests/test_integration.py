@@ -28,7 +28,7 @@ def _setup_project(tmp_path: Path) -> Path:
     # output/
     (tval_dir / "output").mkdir()
 
-    # source_dirをschema YAML内で絶対パスに書き換え
+    # Rewrite source_dir in schema YAMLs to absolute paths
     for yaml_file in schema_dir.glob("*.yaml"):
         with open(yaml_file, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
@@ -37,7 +37,7 @@ def _setup_project(tmp_path: Path) -> Path:
         with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(doc, f, allow_unicode=True)
 
-    # config.yaml を絶対パスで生成
+    # Generate config.yaml with absolute paths
     config = {
         "database_path": str(tval_dir / "work.duckdb"),
         "schema_dir": str(schema_dir),
