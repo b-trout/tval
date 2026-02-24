@@ -1,0 +1,18 @@
+[project]
+name = "tval"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb",
+    "pydantic",
+    "pyyaml",
+    "jinja2",
+    "chardet",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+]
