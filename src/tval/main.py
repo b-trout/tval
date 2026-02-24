@@ -77,57 +77,52 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     if db_path.exists():
         db_path.unlink()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn_rw = duckdb.connect(str(db_path))
+    with duckdb.connect(str(db_path)) as conn_rw:
+        # 6. Create tables and load files
+        create_tables(conn_rw, ordered_defs)
+        confidence_threshold: float = config.get("encoding_confidence_threshold", 0.8)
 
-    # 6. Create tables and load files
-    create_tables(conn_rw, ordered_defs)
-    confidence_threshold: float = config.get("encoding_confidence_threshold", 0.8)
-
-    all_load_errors: dict[str, list[LoadError]] = {}
-    for tdef in ordered_defs:
-        load_errors = load_files(
-            conn_rw, tdef, confidence_threshold=confidence_threshold
-        )
-        all_load_errors[tdef.table.name] = load_errors
-
-    conn_rw.close()
+        all_load_errors: dict[str, list[LoadError]] = {}
+        for tdef in ordered_defs:
+            load_errors = load_files(
+                conn_rw, tdef, confidence_threshold=confidence_threshold
+            )
+            all_load_errors[tdef.table.name] = load_errors
 
     # 7. Run checks/profiler on a read-only connection
-    conn_ro = duckdb.connect(str(db_path), read_only=True)
-    table_reports: list[TableReport] = []
-    for tdef in ordered_defs:
-        load_errors = all_load_errors[tdef.table.name]
-        check_results, agg_check_results = run_checks(conn_ro, tdef, load_errors)
-        profiles = profile_table(conn_ro, tdef, load_errors)
+    with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+        table_reports: list[TableReport] = []
+        for tdef in ordered_defs:
+            load_errors = all_load_errors[tdef.table.name]
+            check_results, agg_check_results = run_checks(conn_ro, tdef, load_errors)
+            profiles = profile_table(conn_ro, tdef, load_errors)
 
-        table_reports.append(
-            TableReport(
-                table_def=tdef,
-                load_errors=load_errors,
-                check_results=check_results,
-                agg_check_results=agg_check_results,
-                profiles=profiles,
-                export_result=None,
+            table_reports.append(
+                TableReport(
+                    table_def=tdef,
+                    load_errors=load_errors,
+                    check_results=check_results,
+                    agg_check_results=agg_check_results,
+                    profiles=profiles,
+                    export_result=None,
+                )
             )
-        )
-    conn_ro.close()
 
     # 8. Export
     if export:
         all_ok = all(r.overall_status == "OK" for r in table_reports)
         output_base_dir = output_path_cfg.parent / "parquet"
-        conn_ro = duckdb.connect(str(db_path), read_only=True)
-        for report, tdef in zip(table_reports, ordered_defs):
-            if not all_ok:
-                report.export_result = ExportResult(
-                    table_name=tdef.table.name,
-                    status="SKIPPED",
-                    output_path="",
-                    message="Skipped because tables with validation failures exist",
-                )
-            else:
-                report.export_result = export_table(conn_ro, tdef, output_base_dir)
-        conn_ro.close()
+        with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+            for report, tdef in zip(table_reports, ordered_defs):
+                if not all_ok:
+                    report.export_result = ExportResult(
+                        table_name=tdef.table.name,
+                        status="SKIPPED",
+                        output_path="",
+                        message="Skipped because tables with validation failures exist",
+                    )
+                else:
+                    report.export_result = export_table(conn_ro, tdef, output_base_dir)
 
     # 9. Generate report
     output_path_cfg.parent.mkdir(parents=True, exist_ok=True)
