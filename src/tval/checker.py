@@ -1,3 +1,9 @@
+"""Execute validation checks against loaded DuckDB tables.
+
+Runs allowed-value checks, user-defined checks, and aggregation checks for each
+table, returning structured results with OK / NG / SKIPPED status.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +20,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class CheckResult:
+    """Result of a single validation check execution."""
+
     description: str
     query: str
     status: str  # "OK" | "NG" | "SKIPPED"
@@ -22,7 +30,7 @@ class CheckResult:
 
 
 def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
-    """allowed_valuesから自動SQLを生成する。"""
+    """Build a CheckDef that verifies column values are within the allowed set."""
     escaped = ", ".join(
         f"'{v.replace(chr(39), chr(39) * 2)}'" for v in col.allowed_values
     )
@@ -42,7 +50,7 @@ def _execute_check(
     check: CheckDef,
     table_name: str,
 ) -> CheckResult:
-    """1件のチェックを実行する。"""
+    """Execute a single check query and return a CheckResult."""
     query = check.query.replace("{table}", quote_identifier(table_name))
     try:
         result = conn.execute(query).fetchone()
@@ -89,7 +97,11 @@ def run_checks(
     tdef: TableDef,
     load_errors: list[LoadError],
 ) -> tuple[list[CheckResult], list[CheckResult]]:
-    """checks と aggregation_checks を実行する。"""
+    """Run all checks and aggregation checks for a table.
+
+    If load errors exist for the table, all checks are marked as SKIPPED.
+    Returns a tuple of (check_results, aggregation_check_results).
+    """
     table_name = tdef.table.name
     logger.info("チェック実行開始", extra={"table": table_name})
 
