@@ -1,0 +1,4 @@
+database_path: ./work.duckdb
+schema_dir: ./schema
+output_path: ./output/report.html
+encoding_confidence_threshold: 0.8

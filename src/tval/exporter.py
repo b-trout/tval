@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import duckdb
+
+from .builder import quote_identifier
+from .logger import get_logger
+from .parser import TableDef
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class ExportResult:
+    table_name: str
+    status: str  # "OK" | "SKIPPED" | "ERROR"
+    output_path: str
+    message: str = ""
+
+
+def export_table(
+    conn: duckdb.DuckDBPyConnection,
+    tdef: TableDef,
+    output_base_dir: str | Path,
+) -> ExportResult:
+    """テーブルをParquetに書き出す。"""
+    table_name = tdef.table.name
+    output_dir = Path(output_base_dir) / table_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    qtable = quote_identifier(table_name)
+    partition_by = tdef.export.partition_by
+
+    try:
+        if partition_by:
+            partition_cols = ", ".join(quote_identifier(c) for c in partition_by)
+            output_path = str(output_dir.resolve())
+            sql = (
+                f"COPY {qtable} TO '{output_path}' "
+                f"(FORMAT parquet, PARTITION_BY ({partition_cols}), "
+                f"OVERWRITE_OR_IGNORE)"
+            )
+            conn.execute(sql)
+        else:
+            output_file = output_dir / f"{table_name}.parquet"
+            output_path = str(output_file.resolve())
+            sql = f"COPY {qtable} TO '{output_path}' (FORMAT parquet)"
+            conn.execute(sql)
+
+        return ExportResult(
+            table_name=table_name,
+            status="OK",
+            output_path=output_path,
+        )
+    except Exception as e:
+        return ExportResult(
+            table_name=table_name,
+            status="ERROR",
+            output_path=str(output_dir),
+            message=str(e),
+        )
