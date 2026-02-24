@@ -1,7 +1,12 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "tval"
 version = "0.1.0"
-requires-python = ">=3.12"
+description = "Table data validator for pre-analysis data validation"
+requires-python = ">=3.9"
 dependencies = [
     "duckdb",
     "pydantic",
@@ -10,19 +15,25 @@ dependencies = [
     "chardet",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest",
     "ruff",
     "mypy",
 ]
 
+[project.scripts]
+tval = "tval.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tval"]
+
 [tool.ruff]
 target-version = "py39"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
 
 [tool.mypy]
 python_version = "3.9"

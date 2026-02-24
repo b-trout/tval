@@ -4,9 +4,9 @@ ARG DEBIAN_VERSION=trixie-slim
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION}-python${PYTHON_VERSION}-${DEBIAN_VERSION}
 
-# Install sudo
+# Install sudo and git
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sudo \
+    && apt-get install -y --no-install-recommends sudo git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with sudo privileges
@@ -22,8 +22,9 @@ WORKDIR /home/${USERNAME}/workspace
 
 # Create virtual environment and install dependencies
 COPY pyproject.toml .
+COPY src/tval/__init__.py src/tval/__init__.py
 COPY scripts/pre-commit.sh scripts/pre-commit.sh
-RUN uv sync --group dev
+RUN uv sync --extra dev
 ENV VIRTUAL_ENV=/home/${USERNAME}/workspace/.venv
 ENV PATH="/home/${USERNAME}/workspace/.venv/bin:${PATH}"
 
