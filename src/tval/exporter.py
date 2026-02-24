@@ -1,3 +1,9 @@
+"""Export validated DuckDB tables to Parquet files.
+
+Supports optional partitioning by specified columns using DuckDB's COPY
+statement.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +20,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class ExportResult:
+    """Result of a single table export operation."""
+
     table_name: str
     status: str  # "OK" | "SKIPPED" | "ERROR"
     output_path: str
@@ -25,7 +33,7 @@ def export_table(
     tdef: TableDef,
     output_base_dir: str | Path,
 ) -> ExportResult:
-    """テーブルをParquetに書き出す。"""
+    """Export a table to Parquet format, optionally partitioned by columns."""
     table_name = tdef.table.name
     output_dir = Path(output_base_dir) / table_name
     output_dir.mkdir(parents=True, exist_ok=True)
