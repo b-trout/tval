@@ -1,3 +1,5 @@
+"""End-to-end integration tests for the tval validation pipeline."""
+
 from __future__ import annotations
 
 import shutil
@@ -11,7 +13,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _setup_project(tmp_path: Path) -> Path:
-    """テスト用のプロジェクト構造をtmp_pathにコピーする。"""
+    """Copy test fixtures into tmp_path and build a project structure."""
     tval_dir = tmp_path / "tval"
     tval_dir.mkdir()
 
@@ -50,7 +52,10 @@ def _setup_project(tmp_path: Path) -> Path:
 
 
 class TestIntegration:
+    """Integration tests that exercise the full run() pipeline."""
+
     def test_run_generates_report(self, tmp_path: Path) -> None:
+        """Running tval should produce an HTML report containing table names."""
         config_path = _setup_project(tmp_path)
         run(str(config_path))
         report = tmp_path / "tval" / "output" / "report.html"
@@ -60,6 +65,7 @@ class TestIntegration:
         assert "orders" in content
 
     def test_run_with_export(self, tmp_path: Path) -> None:
+        """Running tval with export=True should produce Parquet output files."""
         config_path = _setup_project(tmp_path)
         run(str(config_path), export=True)
 
