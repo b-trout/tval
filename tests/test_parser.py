@@ -136,7 +136,7 @@ class TestParserInvalid:
     def test_pk_nonexistent_column(
         self, tmp_path: Path, data_dir: Path, project_root: Path
     ) -> None:
-        """A primary key referencing a nonexistent column should raise ValidationError."""
+        """PK with nonexistent column raises ValidationError."""
         data = _valid_data(data_dir)
         data["table_constraints"]["primary_key"] = {  # type: ignore[index]
             "columns": ["nonexistent"]
@@ -148,7 +148,7 @@ class TestParserInvalid:
     def test_export_partition_by_nonexistent_column(
         self, tmp_path: Path, data_dir: Path, project_root: Path
     ) -> None:
-        """partition_by referencing a nonexistent column should raise ValidationError."""
+        """partition_by with nonexistent column raises ValidationError."""
         data = _valid_data(data_dir)
         data["export"] = {"partition_by": ["nonexistent"]}
         path = _make_yaml(tmp_path, data)

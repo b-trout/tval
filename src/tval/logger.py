@@ -43,7 +43,7 @@ class JsonFormatter(logging.Formatter):
     """Log formatter that outputs records as single-line JSON objects."""
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format a log record as a JSON string with timestamp, level, module, and extras."""
+        """Format a log record as JSON."""
         log: dict[str, object] = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
             "level": record.levelname,
