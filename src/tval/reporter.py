@@ -1,3 +1,9 @@
+"""Generate HTML validation reports using Jinja2 templates.
+
+Aggregates per-table load errors, check results, profiling data, and export
+results into a single HTML report.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +20,8 @@ from .profiler import ColumnProfile
 
 @dataclass
 class TableReport:
+    """Aggregated validation results for a single table."""
+
     table_def: TableDef
     load_errors: list[LoadError]
     check_results: list[CheckResult]
@@ -23,6 +31,7 @@ class TableReport:
 
     @property
     def overall_status(self) -> str:
+        """Return 'NG' if any load errors or check failures exist, otherwise 'OK'."""
         if self.load_errors:
             return "NG"
         for cr in self.check_results:
@@ -40,7 +49,7 @@ def generate_report(
     db_path: str,
     executed_at: str,
 ) -> None:
-    """Jinja2でHTMLを生成しoutput_pathに書き出す。"""
+    """Render the HTML report from Jinja2 template and write to output_path."""
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(str(template_dir)),

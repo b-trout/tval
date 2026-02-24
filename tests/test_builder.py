@@ -1,3 +1,5 @@
+"""Tests for the builder module's load order resolution."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +15,7 @@ def _make_tdef(
     name: str,
     fk_refs: list[dict[str, object]] | None = None,
 ) -> TableDef:
-    """テスト用のTableDefを生成する。"""
+    """Create a minimal TableDef for testing with optional FK references."""
     data_dir = tmp_path / "data" / name
     data_dir.mkdir(parents=True, exist_ok=True)
     fks = fk_refs or []
@@ -43,7 +45,10 @@ def _make_tdef(
 
 
 class TestBuildLoadOrder:
+    """Tests for build_load_order topological sorting."""
+
     def test_fk_dependency_order(self, tmp_path: Path) -> None:
+        """Referenced tables should appear before dependent tables."""
         users = _make_tdef(tmp_path, "users")
         orders = _make_tdef(
             tmp_path,
@@ -60,6 +65,7 @@ class TestBuildLoadOrder:
         assert names.index("users") < names.index("orders")
 
     def test_circular_dependency_raises(self, tmp_path: Path) -> None:
+        """Circular FK dependencies should raise ValueError."""
         a = _make_tdef(
             tmp_path,
             "a",
@@ -84,6 +90,7 @@ class TestBuildLoadOrder:
             build_load_order([a, b])
 
     def test_undefined_fk_reference_raises(self, tmp_path: Path) -> None:
+        """FK referencing an undefined table should raise ValueError."""
         orders = _make_tdef(
             tmp_path,
             "orders",

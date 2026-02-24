@@ -1,3 +1,9 @@
+"""Scaffold a new tval project directory.
+
+Creates the standard directory structure (schema/, data/, output/), a default
+config.yaml, and appends tval-specific entries to .gitignore.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +23,11 @@ GITIGNORE_ENTRIES = [
 
 
 def run_init(target_dir: str = "./tval") -> None:
-    """プロジェクトスケルトンを生成する。"""
+    """Generate the tval project skeleton under the given directory.
+
+    Creates subdirectories, config.yaml, .gitkeep files, and updates
+    .gitignore. Exits with code 1 if the target directory already exists.
+    """
     target = Path(target_dir)
 
     if target.exists():

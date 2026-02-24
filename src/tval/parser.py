@@ -1,3 +1,9 @@
+"""Parse and validate YAML schema definitions into Pydantic models.
+
+Defines the data models (ColumnDef, TableDef, etc.) for table schema
+definitions and provides functions to load them from YAML files.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +16,8 @@ DATETIME_TYPES = {"DATE", "TIMESTAMP", "TIME"}
 
 
 class ColumnDef(BaseModel):
+    """Definition of a single table column with type and constraint metadata."""
+
     name: str
     logical_name: str
     type: str
@@ -21,10 +29,12 @@ class ColumnDef(BaseModel):
     @field_validator("type")
     @classmethod
     def upper_type(cls, v: str) -> str:
+        """Normalize the column type to uppercase."""
         return v.upper()
 
     @model_validator(mode="after")
     def validate_format_type(self) -> ColumnDef:
+        """Ensure the format field is only used with DATE/TIMESTAMP/TIME types."""
         if self.format is not None:
             base_type = self.type.split("(")[0].strip()
             if base_type not in DATETIME_TYPES:
@@ -35,30 +45,42 @@ class ColumnDef(BaseModel):
 
 
 class PrimaryKeyDef(BaseModel):
+    """Primary key constraint definition."""
+
     columns: list[str]
 
 
 class UniqueDef(BaseModel):
+    """Unique constraint definition."""
+
     columns: list[str]
 
 
 class FKReference(BaseModel):
+    """Foreign key reference target (table and columns)."""
+
     table: str
     columns: list[str]
 
 
 class ForeignKeyDef(BaseModel):
+    """Foreign key constraint definition."""
+
     columns: list[str]
     references: FKReference
 
 
 class CheckDef(BaseModel):
+    """User-defined SQL check with an expected outcome."""
+
     description: str
     query: str
     expect_zero: bool = True
 
 
 class TableConstraints(BaseModel):
+    """Collection of all table-level constraints."""
+
     primary_key: list[PrimaryKeyDef]
     foreign_keys: list[ForeignKeyDef]
     unique: list[UniqueDef]
@@ -68,22 +90,29 @@ class TableConstraints(BaseModel):
     @field_validator("primary_key", mode="before")
     @classmethod
     def wrap_single_pk(cls, v: Any) -> Any:
+        """Allow a single primary key dict to be passed without wrapping in a list."""
         if isinstance(v, dict):
             return [v]
         return v
 
 
 class ExportDef(BaseModel):
+    """Export configuration for a table (e.g. Parquet partitioning)."""
+
     partition_by: list[str] = []
 
 
 class TableMeta(BaseModel):
+    """Table-level metadata: name, description, and data source directory."""
+
     name: str
     description: str
     source_dir: str
 
 
 class TableDef(BaseModel):
+    """Complete table definition including columns, constraints, and export config."""
+
     table: TableMeta
     columns: list[ColumnDef]
     table_constraints: TableConstraints
@@ -92,6 +121,7 @@ class TableDef(BaseModel):
     @model_validator(mode="wrap")
     @classmethod
     def validate_all(cls, values: Any, handler: Any, info: ValidationInfo) -> TableDef:
+        """Validate cross-field constraints."""
         obj: TableDef = handler(values)
 
         if len(obj.columns) == 0:
@@ -155,7 +185,7 @@ class TableDef(BaseModel):
 def load_table_definition(
     path: str | Path, project_root: str | Path | None = None
 ) -> TableDef:
-    """単一YAMLファイルを読み込みTableDefを返す。"""
+    """Load a single YAML schema file and return a validated TableDef."""
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     context: dict[str, Any] = {}
@@ -167,7 +197,7 @@ def load_table_definition(
 def load_table_definitions(
     schema_dir: str | Path, project_root: str | Path | None = None
 ) -> list[TableDef]:
-    """schema_dir以下の全*.yamlを読み込む。"""
+    """Load all YAML schema files from a directory and return a list of TableDefs."""
     schema_path = Path(schema_dir)
     yaml_files = sorted(schema_path.glob("*.yaml"))
     if not yaml_files:

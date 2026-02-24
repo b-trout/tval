@@ -1,3 +1,10 @@
+"""Build DuckDB tables from parsed schema definitions.
+
+Provides functions to generate CREATE TABLE SQL statements, resolve foreign-key
+dependency order via topological sort, and execute table creation on a DuckDB
+connection.
+"""
+
 from __future__ import annotations
 
 import re
@@ -13,19 +20,34 @@ logger = get_logger(__name__)
 
 
 def validate_identifier(name: str) -> str:
-    """英字またはアンダースコア始まり、英数字・アンダースコアのみ許可。"""
+    """Validate that a name is a safe SQL identifier.
+
+    Must start with a letter or underscore and contain only alphanumeric
+    characters and underscores.
+
+    Raises:
+        ValueError: If the name contains invalid characters.
+    """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         raise ValueError(f"Invalid identifier: {name!r}")
     return name
 
 
 def quote_identifier(name: str) -> str:
-    """識別子をダブルクォートでエスケープする。"""
+    """Wrap a validated identifier in double quotes for safe use in SQL."""
     return f'"{validate_identifier(name)}"'
 
 
 def build_load_order(table_defs: list[TableDef]) -> list[TableDef]:
-    """外部キー依存関係からDAGを構築し、トポロジカルソート順で返す。"""
+    """Return table definitions sorted by foreign-key dependency order.
+
+    Builds a DAG from foreign-key references and returns the topologically
+    sorted list so that referenced tables are created before dependents.
+
+    Raises:
+        ValueError: If a foreign key references an undefined table or if a
+            circular dependency is detected.
+    """
     name_to_def: dict[str, TableDef] = {}
     for tdef in table_defs:
         name_to_def[tdef.table.name] = tdef
@@ -50,7 +72,7 @@ def build_load_order(table_defs: list[TableDef]) -> list[TableDef]:
 
 
 def build_create_table_sql(tdef: TableDef) -> str:
-    """TableDefからCREATE TABLE文字列を生成する。"""
+    """Generate a CREATE TABLE SQL statement from a table definition."""
     table_name = quote_identifier(tdef.table.name)
     col_defs = (
         f"    {quote_identifier(col.name)} {col.type}"
@@ -76,7 +98,7 @@ def build_create_table_sql(tdef: TableDef) -> str:
 
 
 def create_tables(conn: duckdb.DuckDBPyConnection, table_defs: list[TableDef]) -> None:
-    """build_load_order順でCREATE TABLEを実行する。"""
+    """Create all tables in dependency order on the given DuckDB connection."""
     ordered = build_load_order(table_defs)
     for tdef in ordered:
         sql = build_create_table_sql(tdef)

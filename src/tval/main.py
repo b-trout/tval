@@ -1,3 +1,10 @@
+"""Main orchestration module for tval validation pipeline.
+
+Coordinates the full workflow: config loading, schema parsing, table creation,
+data loading, validation checks, profiling, optional Parquet export, and HTML
+report generation.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,7 +26,20 @@ logger = get_logger(__name__)
 
 
 def run(config_path: str | None = None, export: bool = False) -> None:
-    """バリデーションを実行しHTMLレポートを生成する。"""
+    """Run the full validation pipeline and generate an HTML report.
+
+    Loads config, parses schemas, creates DuckDB tables, loads data files,
+    runs validation checks and profiling, optionally exports to Parquet,
+    and writes an HTML report.
+
+    Args:
+        config_path: Path to config.yaml. Auto-discovered if None.
+        export: If True, export validated tables to Parquet files.
+
+    Raises:
+        FileNotFoundError: If config.yaml or schema files are not found.
+        ValueError: If database_path does not have a .duckdb extension.
+    """
     logger.info("tval 実行開始")
 
     # 1. config探索
