@@ -56,7 +56,7 @@ Open `tval/output/report.html` in your browser to review the results.
 
 ### 1.1 What tval Does
 
-tval is a proof-of-concept CLI tool that validates tabular data files (CSV, Excel, Parquet) against YAML schema definitions. It leverages DuckDB as an in-process analytical database to execute constraint checks, compute column statistics, and optionally export validated data to Parquet format. Results are collected into a single self-contained HTML report.
+tval is a CLI tool that validates tabular data files (CSV, Excel, Parquet) against YAML schema definitions. It leverages DuckDB as an in-process analytical database to execute constraint checks, compute column statistics, and optionally export validated data to Parquet format. Results are collected into a single self-contained HTML report.
 
 ### 1.2 Problems It Solves
 
