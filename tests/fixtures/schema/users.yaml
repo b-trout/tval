@@ -1,0 +1,29 @@
+table:
+  name: users
+  description: ユーザーテーブル
+  source_dir: ./data/users/
+
+columns:
+  - name: user_id
+    logical_name: ユーザーID
+    type: INTEGER
+    not_null: true
+
+  - name: name
+    logical_name: 名前
+    type: VARCHAR
+    not_null: true
+
+  - name: email
+    logical_name: メールアドレス
+    type: VARCHAR
+    not_null: true
+
+table_constraints:
+  primary_key:
+    columns: [user_id]
+  unique:
+    - columns: [email]
+  foreign_keys: []
+  checks: []
+  aggregation_checks: []

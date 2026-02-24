@@ -1,0 +1,44 @@
+table:
+  name: orders
+  description: 注文テーブル
+  source_dir: ./data/orders/
+
+columns:
+  - name: order_id
+    logical_name: 注文ID
+    type: INTEGER
+    not_null: true
+
+  - name: user_id
+    logical_name: ユーザーID
+    type: INTEGER
+    not_null: true
+
+  - name: amount
+    logical_name: 金額
+    type: DOUBLE
+    not_null: true
+
+  - name: status
+    logical_name: ステータス
+    type: VARCHAR
+    not_null: true
+    allowed_values: ["pending", "shipped", "cancelled"]
+
+table_constraints:
+  primary_key:
+    columns: [order_id]
+  unique: []
+  foreign_keys:
+    - columns: [user_id]
+      references:
+        table: users
+        columns: [user_id]
+  checks:
+    - description: 金額は0以上であること
+      query: "SELECT COUNT(*) FROM {table} WHERE amount < 0"
+      expect_zero: true
+  aggregation_checks: []
+
+export:
+  partition_by: []
