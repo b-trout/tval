@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tval バリデーションレポート</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 16px; }
+  h2 { font-size: 1.25rem; margin: 24px 0 12px; border-bottom: 2px solid #ddd; padding-bottom: 4px; }
+  h3 { font-size: 1rem; margin: 16px 0 8px; }
+  .summary { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+  .summary-item { text-align: center; padding: 8px; border-radius: 4px; background: #f9f9f9; }
+  .summary-item .label { font-size: 0.85rem; color: #666; }
+  .summary-item .value { font-size: 1.5rem; font-weight: bold; }
+  .table-section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .status-ok { color: #22c55e; }
+  .status-ng { color: #ef4444; }
+  .status-skipped { color: #f59e0b; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.9rem; }
+  th, td { padding: 6px 10px; text-align: left; border: 1px solid #e5e7eb; }
+  th { background: #f9fafb; font-weight: 600; }
+  tr:nth-child(even) { background: #fafafa; }
+  .meta { font-size: 0.85rem; color: #666; margin-bottom: 4px; }
+  pre { background: #f5f5f5; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>tval バリデーションレポート</h1>
+
+  <div class="summary">
+    <div class="meta">実行日時: {{ executed_at }}</div>
+    <div class="meta">データベース: {{ db_path }}</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="label">テーブル数</div>
+        <div class="value">{{ summary.total }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">OK</div>
+        <div class="value status-ok">{{ summary.ok }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">NG</div>
+        <div class="value status-ng">{{ summary.ng }}</div>
+      </div>
+    </div>
+  </div>
+
+  {% for report in table_reports %}
+  <div class="table-section">
+    <h2>
+      {% if report.overall_status == "OK" %}
+        <span class="status-ok">&#x2705;</span>
+      {% else %}
+        <span class="status-ng">&#x274C;</span>
+      {% endif %}
+      {{ report.table_def.table.name }} - {{ report.table_def.table.description }}
+    </h2>
+
+    {# Load Errors #}
+    <h3>ファイルロード結果</h3>
+    {% if report.load_errors %}
+    <table>
+      <thead>
+        <tr><th>ファイル</th><th>エラー種別</th><th>カラム</th><th>行</th><th>メッセージ</th></tr>
+      </thead>
+      <tbody>
+        {% for err in report.load_errors %}
+        <tr>
+          <td>{{ err.file_path }}</td>
+          <td>{{ err.error_type }}</td>
+          <td>{{ err.column or "-" }}</td>
+          <td>{{ err.row or "-" }}</td>
+          <td><pre>{{ err.raw_message }}</pre></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="status-ok">全ファイル正常ロード</p>
+    {% endif %}
+
+    {# Checks #}
+    {% if report.check_results %}
+    <h3>ロジックバリデーション (checks)</h3>
+    <table>
+      <thead>
+        <tr><th>チェック内容</th><th>ステータス</th><th>件数</th><th>メッセージ</th></tr>
+      </thead>
+      <tbody>
+        {% for cr in report.check_results %}
+        <tr>
+          <td>{{ cr.description }}</td>
+          <td>
+            {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
+            {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
+          </td>
+          <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
+          <td>{{ cr.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {# Aggregation Checks #}
+    {% if report.agg_check_results %}
+    <h3>集計バリデーション (aggregation_checks)</h3>
+    <table>
+      <thead>
+        <tr><th>チェック内容</th><th>ステータス</th><th>件数</th><th>メッセージ</th></tr>
+      </thead>
+      <tbody>
+        {% for cr in report.agg_check_results %}
+        <tr>
+          <td>{{ cr.description }}</td>
+          <td>
+            {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
+            {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
+          </td>
+          <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
+          <td>{{ cr.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {# Profiles #}
+    {% if report.profiles %}
+    <h3>基本統計量</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>カラム</th><th>論理名</th><th>型</th>
+          <th>件数</th><th>NOT NULL</th><th>ユニーク</th>
+          <th>平均</th><th>標準偏差</th><th>歪度</th><th>尖度</th>
+          <th>最小</th><th>P25</th><th>中央値</th><th>P75</th><th>最大</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in report.profiles %}
+        <tr>
+          <td>{{ p.column_name }}</td>
+          <td>{{ p.logical_name }}</td>
+          <td>{{ p.column_type }}</td>
+          <td>{{ p.count }}</td>
+          <td>{{ p.not_null_count }}</td>
+          <td>{{ p.unique_count }}</td>
+          {% if p.is_numeric %}
+          <td>{{ "%.4f"|format(p.mean) if p.mean is not none else "-" }}</td>
+          <td>{{ "%.4f"|format(p.std) if p.std is not none else "-" }}</td>
+          <td>{{ "%.4f"|format(p.skewness) if p.skewness is not none else "-" }}</td>
+          <td>{{ "%.4f"|format(p.kurtosis) if p.kurtosis is not none else "-" }}</td>
+          <td>{{ p.min if p.min is not none else "-" }}</td>
+          <td>{{ p.p25 if p.p25 is not none else "-" }}</td>
+          <td>{{ p.median if p.median is not none else "-" }}</td>
+          <td>{{ p.p75 if p.p75 is not none else "-" }}</td>
+          <td>{{ p.max if p.max is not none else "-" }}</td>
+          {% else %}
+          <td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {# Export Result #}
+    {% if report.export_result %}
+    <h3>エクスポート結果</h3>
+    <table>
+      <thead>
+        <tr><th>ステータス</th><th>出力先</th><th>メッセージ</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            {% if report.export_result.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
+            {% elif report.export_result.status == "SKIPPED" %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>
+            {% else %}<span class="status-ng">&#x274C; ERROR</span>{% endif %}
+          </td>
+          <td>{{ report.export_result.output_path }}</td>
+          <td>{{ report.export_result.message }}</td>
+        </tr>
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+</body>
+</html>
