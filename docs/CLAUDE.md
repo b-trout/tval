@@ -12,7 +12,7 @@
 
 1. `DESIGN.md` を最初から最後まで読む
 2. 不明点があれば実装を始める前に質問する。推測で実装しない
-
+3. Before task starts, create new branch from main branch
 ---
 
 ## 実装順序
@@ -42,7 +42,7 @@
 ## 技術的制約
 
 ### Python バージョン
-3.9以上必須。`graphlib` を使用するため。
+3.10以上必須
 
 ### 依存ライブラリ
 以下のみ使用する。新たな依存を追加しない。
@@ -149,7 +149,7 @@ line-length = 88
 select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 strict = true
 ```
 
