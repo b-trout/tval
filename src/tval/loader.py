@@ -66,11 +66,8 @@ def _resolve_csv_path(
             f"threshold={confidence_threshold})"
         )
 
-    if encoding.lower().replace("-", "") in ("utf8", "ascii"):
-        return file_path, False
-
-    logger.warning(
-        "Converted CSV encoding to UTF-8",
+    logger.info(
+        "Converting CSV to temporary UTF-8 file",
         extra={
             "file": file_path,
             "detected_encoding": encoding,
@@ -111,14 +108,13 @@ def _build_insert_select(tdef: TableDef) -> str:
 
 
 def _build_columns_override(tdef: TableDef) -> str:
-    """Build a columns/types override string for read_csv_auto or read_xlsx.
+    """Build a columns/types override string for read_csv or read_xlsx.
 
+    Always returns explicit column types from the table definition.
     Columns with a format specifier are overridden to VARCHAR so that
     STRPTIME can parse them in the SELECT clause.
     """
     format_cols = {col.name for col in tdef.columns if col.format}
-    if not format_cols:
-        return ""
 
     return (
         "{"
@@ -228,17 +224,11 @@ def _insert_file(
     try:
         if ext == ".csv":
             resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
-            if columns_override:
-                sql = (
-                    f"INSERT INTO {table_name} {select_clause} "
-                    f"FROM read_csv_auto(?, header=true, "
-                    f"columns={columns_override})"
-                )
-            else:
-                sql = (
-                    f"INSERT INTO {table_name} {select_clause} "
-                    f"FROM read_csv_auto(?, header=true)"
-                )
+            sql = (
+                f"INSERT INTO {table_name} {select_clause} "
+                f"FROM read_csv(?, header=true, "
+                f"columns={columns_override})"
+            )
             conn.execute(sql, [resolved_path])
         elif ext == ".parquet":
             # NOTE: read_parquet does not support a columns override parameter.
