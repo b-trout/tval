@@ -198,6 +198,58 @@
     {% endif %}
   </div>
   {% endfor %}
+
+  {# Relation Checks #}
+  {% if relation_check_results %}
+  <div class="table-section">
+    <h2>
+      {% if relation_summary.ng > 0 %}
+        <span class="status-ng">&#x274C;</span>
+      {% else %}
+        <span class="status-ok">&#x2705;</span>
+      {% endif %}
+      Relation Cardinality Validation
+    </h2>
+    <div class="summary-grid" style="margin-bottom: 12px;">
+      <div class="summary-item">
+        <div class="label">Total Checks</div>
+        <div class="value">{{ relation_summary.total }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">OK</div>
+        <div class="value status-ok">{{ relation_summary.ok }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">NG</div>
+        <div class="value status-ng">{{ relation_summary.ng }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">Skipped</div>
+        <div class="value status-skipped">{{ relation_summary.skipped }}</div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Check</th><th>Status</th><th>Count</th><th>Message</th></tr>
+      </thead>
+      <tbody>
+        {% for cr in relation_check_results %}
+        <tr>
+          <td>{{ cr.description }}</td>
+          <td>
+            {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
+            {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% elif cr.status == "ERROR" %}<span class="status-ng">&#x26D4; ERROR</span>
+            {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
+          </td>
+          <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
+          <td>{{ cr.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </div>
 </body>
 </html>

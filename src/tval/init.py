@@ -13,6 +13,7 @@ database_path: ./tval/work.duckdb
 schema_dir: ./tval/schema
 output_path: ./tval/output/report.html
 encoding_confidence_threshold: 0.8
+# relations_path: ./tval/relations.yaml
 """
 
 GITIGNORE_ENTRIES = [

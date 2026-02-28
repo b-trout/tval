@@ -14,12 +14,18 @@ import duckdb
 import yaml
 
 from .builder import build_load_order, create_tables
-from .checker import run_checks
+from .checker import CheckResult, run_checks
 from .exporter import ExportResult, export_table
 from .loader import LoadError, load_files
 from .logger import get_logger
 from .parser import load_table_definitions
 from .profiler import profile_table
+from .relation import (
+    RelationDef,
+    load_relations,
+    run_relation_checks,
+    validate_relation_refs,
+)
 from .reporter import TableReport, generate_report
 
 logger = get_logger(__name__)
@@ -70,6 +76,14 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     # 3. Load schema YAML files
     table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
 
+    # 3.5. Load relations (optional)
+    relations_path_cfg = config.get("relations_path")
+    relations: list[RelationDef] = []
+    if relations_path_cfg:
+        relations_file = project_root / relations_path_cfg
+        relations = load_relations(str(relations_file))
+        validate_relation_refs(relations, table_defs)
+
     # 4. Determine load order via DAG
     ordered_defs = build_load_order(table_defs)
 
@@ -90,6 +104,7 @@ def run(config_path: str | None = None, export: bool = False) -> None:
             all_load_errors[tdef.table.name] = load_errors
 
     # 7. Run checks/profiler on a read-only connection
+    relation_check_results: list[CheckResult] = []
     with duckdb.connect(str(db_path), read_only=True) as conn_ro:
         table_reports: list[TableReport] = []
         for tdef in ordered_defs:
@@ -108,9 +123,19 @@ def run(config_path: str | None = None, export: bool = False) -> None:
                 )
             )
 
+        # 7.5. Run relation checks
+        if relations:
+            relation_check_results = run_relation_checks(
+                conn_ro, relations, all_load_errors
+            )
+
     # 8. Export
     if export:
-        all_ok = all(r.overall_status == "OK" for r in table_reports)
+        tables_ok = all(r.overall_status == "OK" for r in table_reports)
+        relations_ok = all(
+            r.status in ("OK", "SKIPPED") for r in relation_check_results
+        )
+        all_ok = tables_ok and relations_ok
         output_base_dir = output_path_cfg.parent / "parquet"
         with duckdb.connect(str(db_path), read_only=True) as conn_ro:
             for report, tdef in zip(table_reports, ordered_defs):
@@ -131,6 +156,7 @@ def run(config_path: str | None = None, export: bool = False) -> None:
         output_path=str(output_path_cfg),
         db_path=str(db_path),
         executed_at=datetime.now().isoformat(),
+        relation_check_results=relation_check_results,
     )
 
     logger.info("tval execution completed")
