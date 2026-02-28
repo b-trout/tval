@@ -90,10 +90,10 @@ SQLの値は必ず `?` プレースホルダでバインドする。
 
 ```python
 # 正しい
-conn.execute("SELECT * FROM read_csv_auto(?)", [file_path])
+conn.execute("SELECT * FROM read_csv(?, header=true, columns=...)", [file_path])
 
 # 禁止
-conn.execute(f"SELECT * FROM read_csv_auto('{file_path}')")
+conn.execute(f"SELECT * FROM read_csv('{file_path}', header=true, columns=...)")
 ```
 
 ### ロギング
@@ -184,6 +184,8 @@ strict = true
 - 各`error_type`のDuckDBエラー文字列を直接`parse_duckdb_error()`に渡し、正しい`error_type`・`column`・`row`が返ること
 - 未知のエラーメッセージが`UNKNOWN`として返り、`raw_message`が保持されること
 - `_resolve_csv_path()`に信頼度が閾値未満のファイルを渡した場合に`EncodingDetectionError`が送出されること
+- `_resolve_csv_path()`にUTF-8ファイルを渡した場合に元ファイルパスと`is_tmp=False`が返ること
+- `_resolve_csv_path()`に非UTF-8（SJIS等）ファイルを渡した場合にUTF-8一時ファイルが作成されること
 
 **`tests/test_checker.py`**
 - checksクエリ実行時のOK/NG/ERROR判定
