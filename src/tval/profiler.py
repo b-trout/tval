@@ -11,7 +11,6 @@ from dataclasses import dataclass
 import duckdb
 
 from .builder import quote_identifier
-from .loader import DATETIME_TYPES as DATETIME_TYPES
 from .loader import LoadError
 from .logger import get_logger
 from .parser import TableDef
@@ -68,6 +67,7 @@ class ColumnProfile:
     median: float | None
     p75: float | None
     max: float | None
+    error: str | None = None
 
 
 def profile_table(
@@ -176,11 +176,32 @@ def profile_table(
                     max=max_val,
                 )
             )
-        except Exception:
+        except Exception as e:
             logger.error(
                 "Profiling failed",
                 extra={"table": table_name, "column": col.name},
                 exc_info=True,
+            )
+            profiles.append(
+                ColumnProfile(
+                    column_name=col.name,
+                    logical_name=col.logical_name,
+                    column_type=col.type,
+                    is_numeric=numeric,
+                    count=0,
+                    not_null_count=0,
+                    unique_count=0,
+                    mean=None,
+                    std=None,
+                    skewness=None,
+                    kurtosis=None,
+                    min=None,
+                    p25=None,
+                    median=None,
+                    p75=None,
+                    max=None,
+                    error=str(e),
+                )
             )
 
     logger.info("Profiling completed", extra={"table": table_name})

@@ -35,10 +35,10 @@ class TableReport:
         if self.load_errors:
             return "NG"
         for cr in self.check_results:
-            if cr.status == "NG":
+            if cr.status in ("NG", "ERROR"):
                 return "NG"
         for cr in self.agg_check_results:
-            if cr.status == "NG":
+            if cr.status in ("NG", "ERROR"):
                 return "NG"
         return "OK"
 

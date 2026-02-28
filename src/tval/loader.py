@@ -241,10 +241,10 @@ def _insert_file(
                 )
             conn.execute(sql, [resolved_path])
         elif ext == ".parquet":
-            if columns_override:
-                sql = f"INSERT INTO {table_name} {select_clause} FROM read_parquet(?)"
-            else:
-                sql = f"INSERT INTO {table_name} {select_clause} FROM read_parquet(?)"
+            # NOTE: read_parquet does not support a columns override parameter.
+            # format + Parquet combination is not yet supported; STRPTIME in
+            # select_clause may fail on already-typed Parquet columns.
+            sql = f"INSERT INTO {table_name} {select_clause} FROM read_parquet(?)"
             conn.execute(sql, [file_path])
         elif ext == ".xlsx":
             if columns_override:

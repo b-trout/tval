@@ -1,4 +1,4 @@
-ARG UV_VERSION=0.6
+ARG UV_VERSION=0.10
 ARG PYTHON_VERSION=3.12
 ARG DEBIAN_VERSION=trixie-slim
 
@@ -21,13 +21,13 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}/workspace
 
 # Create virtual environment and install dependencies
-COPY pyproject.toml .
+COPY pyproject.toml README.md ./
 COPY src/tval/__init__.py src/tval/__init__.py
 COPY .pre-commit-config.yaml .
-RUN uv sync --extra dev
+RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 uv sync --extra dev --no-install-project
 ENV VIRTUAL_ENV=/home/${USERNAME}/workspace/.venv
 ENV PATH="/home/${USERNAME}/workspace/.venv/bin:${PATH}"
 
 # Install pre-commit hook
 RUN git init /home/${USERNAME}/workspace 2>/dev/null; \
-    uv run pre-commit install
+    pre-commit install
