@@ -27,11 +27,7 @@ Open `tval/output/report.html` in your browser to review the results.
   - [1.2 Problems It Solves](#12-problems-it-solves)
   - [1.3 How It Works](#13-how-it-works)
   - [1.4 Supported Formats](#14-supported-formats)
-  - [1.5 Design Principles](#15-design-principles)
-- [2. Directory Structure](#2-directory-structure)
-  - [2.1 Repository Layout](#21-repository-layout)
-  - [2.2 Project Layout after tval init](#22-project-layout-after-tval-init)
-  - [2.3 Module Responsibilities](#23-module-responsibilities)
+- [2. Project Layout](#2-project-layout)
 - [3. User Guide](#3-user-guide)
   - [3.1 Prerequisites](#31-prerequisites)
   - [3.2 Installation](#32-installation)
@@ -57,43 +53,37 @@ Open `tval/output/report.html` in your browser to review the results.
 
 ### 1.1 What tval Does
 
-tval is a CLI tool that validates tabular data files (CSV, Excel, Parquet) against YAML schema definitions. It leverages DuckDB as an in-process analytical database to execute constraint checks, compute column statistics, and optionally export validated data to Parquet format. Results are collected into a single self-contained HTML report.
+tval is a CLI tool that validates tabular data files (CSV, Excel, Parquet) against YAML schema definitions. It checks data types, missing values, allowed values, custom rules, and cross-table relationships — then generates a single HTML report with all results.
 
 ### 1.2 Problems It Solves
 
-1. **Inconsistent validation quality** - When multiple analysts manually inspect data, coverage and rigor vary. tval enforces a single set of declarative rules.
-2. **Manual validation effort** - Hand-checking row counts, allowed values, foreign keys, and aggregation totals is tedious and error-prone. tval automates the entire pipeline.
+- **Inconsistent validation** — When multiple analysts manually inspect data, coverage varies. tval enforces a single set of declarative rules.
+- **Manual effort** — Hand-checking row counts, allowed values, and aggregation totals is tedious. tval automates the entire process.
 
 ### 1.3 How It Works
 
 ```
-config.yaml          schema/*.yaml
-     |                     |
-     v                     v
-  Load config       Pydantic validation
-     |                     |
-     +--------+------------+
+config.yaml          schema/*.yaml       relations.yaml (optional)
+     |                     |                     |
+     v                     v                     |
+  Load config       Validate schemas             |
+     |                     |                     |
+     +--------+------------+                     |
+              |                                  |
+              v                                  |
+     Load data files (CSV / XLSX / Parquet)       |
+              |                                  |
+              v                                  |
+     Run validation checks                       |
+              |                                  |
+              v                                  |
+     Run relation checks  <----------------------+
               |
               v
-     Build dependency DAG
+     Compute column statistics
               |
               v
-     CREATE TABLE (DuckDB)
-              |
-              v
-     INSERT data (CSV / XLSX / Parquet)
-              |
-              v
-     Run checks (allowed values, user-defined, aggregation)
-              |
-              v
-     Run relation checks (optional, from relations.yaml)
-              |
-              v
-     Profile columns (statistics)
-              |
-              v
-     Export to Parquet (optional, gated by table + relation results)
+     Export to Parquet (optional)
               |
               v
      Generate HTML report
@@ -107,89 +97,24 @@ config.yaml          schema/*.yaml
 | Excel   | `.xlsx`      | `.xls` is **not** supported                     |
 | Parquet | `.parquet`   | Read directly by DuckDB                         |
 
-### 1.5 Design Principles
-
-- **Fail-fast** - Schema YAML is validated by Pydantic before any data is loaded. Invalid definitions stop execution immediately.
-- **One file = one transaction** - Each source file is loaded in its own INSERT; a single bad file does not prevent other files from loading.
-- **Database delegation** - Constraint checking, profiling, and export are all executed as SQL against DuckDB, keeping Python code thin.
-- **Check skipping** - If a table has load errors, all downstream checks are marked `SKIPPED` rather than producing misleading results.
-
 ---
 
-## 2. Directory Structure
+## 2. Project Layout
 
-### 2.1 Repository Layout
-
-```
-tval/
-├── src/tval/
-│   ├── __init__.py          # Package marker
-│   ├── cli.py               # CLI entry point (argparse)
-│   ├── init.py              # tval init scaffolding
-│   ├── main.py              # Pipeline orchestration
-│   ├── parser.py            # YAML schema → Pydantic models
-│   ├── builder.py           # DDL generation + topological sort
-│   ├── loader.py            # CSV/XLSX/Parquet → DuckDB INSERT
-│   ├── checker.py           # Validation check execution
-│   ├── relation.py          # Inter-table relation cardinality validation
-│   ├── profiler.py          # Column statistics computation
-│   ├── exporter.py          # Parquet export with partitioning
-│   ├── reporter.py          # HTML report generation
-│   ├── logger.py            # Structured JSON logging
-│   └── templates/
-│       └── report.html.j2   # Jinja2 HTML report template
-├── tests/
-│   ├── test_parser.py       # Schema parsing and validation
-│   ├── test_builder.py      # DDL generation and dependency ordering
-│   ├── test_loader.py       # Data loading into DuckDB
-│   ├── test_checker.py      # Validation check execution
-│   ├── test_profiler.py     # Column profiling
-│   ├── test_exporter.py     # Parquet export
-│   ├── test_reporter.py     # HTML report generation
-│   ├── test_relation.py     # Relation cardinality validation
-│   └── test_integration.py  # End-to-end pipeline tests
-├── docs/
-│   ├── DESIGN.md            # Architecture and design decisions
-│   ├── Background.md        # Motivation and design rationale
-│   └── CLAUDE.md            # AI assistant context
-├── pyproject.toml           # Build config, dependencies, tool settings
-├── Dockerfile               # Development container
-├── .pre-commit-config.yaml  # Pre-commit hook configuration
-└── .github/workflows/
-    └── ci.yml               # GitHub Actions CI pipeline
-```
-
-### 2.2 Project Layout after `tval init`
-
-Running `tval init` creates the following directory structure:
+After running `tval init`, your project will have this structure:
 
 ```
-tval/
-├── config.yaml       # Validation configuration
-├── schema/           # Table definition YAML files
-│   └── .gitkeep
-├── data/             # Source data files (CSV, XLSX, Parquet)
-│   └── .gitkeep
-└── output/           # Generated reports and exports
-    └── .gitkeep
+your-project/
+├── tval/
+│   ├── config.yaml       # Validation configuration
+│   ├── schema/           # Table definition YAML files (one per table)
+│   ├── data/             # Source data files (CSV, XLSX, Parquet)
+│   └── output/           # Generated reports and exports
+├── ...                   # Your other project files
+└── .gitignore            # tval/data/ and tval/output/ are auto-added
 ```
 
-### 2.3 Module Responsibilities
-
-| Module       | Responsibility                                                      |
-|--------------|---------------------------------------------------------------------|
-| `cli.py`     | Parse CLI arguments, dispatch to `init` or `run`                    |
-| `init.py`    | Scaffold project directories, config, and `.gitignore` entries      |
-| `main.py`    | Orchestrate the full validation pipeline end-to-end                 |
-| `parser.py`  | Define Pydantic models and load/validate YAML schema files          |
-| `builder.py` | Generate CREATE TABLE SQL, resolve FK dependency order (topo sort)  |
-| `loader.py`  | Load CSV/XLSX/Parquet files into DuckDB with encoding detection     |
-| `checker.py` | Execute allowed-value, user-defined, and aggregation checks         |
-| `relation.py`| Validate inter-table relationship cardinalities (1:1, 1:N, N:1, N:N) |
-| `profiler.py`| Compute column statistics (count, nulls, unique, mean, percentiles) |
-| `exporter.py`| Export tables to Parquet with optional Hive partitioning            |
-| `reporter.py`| Render HTML report from Jinja2 template                             |
-| `logger.py`  | Provide structured JSON logging                                     |
+For the repository source layout and module details, see [Section 4.5 Architecture Overview](#45-architecture-overview).
 
 ---
 
@@ -253,7 +178,7 @@ Each table is defined by a YAML file in the `schema/` directory. Below is a full
 ```yaml
 # --- Table metadata ---
 table:
-  name: orders                    # DuckDB table name
+  name: orders                    # Table name used internally
   description: Orders table       # Human-readable description
   source_dir: ./data/orders/      # Directory containing data files (relative to config.yaml)
 
@@ -261,8 +186,8 @@ table:
 columns:
   - name: order_id                # Column name (must match data file headers)
     logical_name: Order ID        # Display name for reports
-    type: INTEGER                 # DuckDB column type
-    not_null: true                # NOT NULL constraint
+    type: INTEGER                 # Data type (INTEGER, VARCHAR, DOUBLE, DATE, etc.)
+    not_null: true                # true = blank/missing values are not allowed
 
   - name: user_id
     logical_name: User ID
@@ -278,7 +203,7 @@ columns:
     logical_name: Status
     type: VARCHAR
     not_null: true
-    allowed_values:               # Enumerated allowed values (checked at validation)
+    allowed_values:               # Only these values are accepted; anything else is flagged
       - pending
       - shipped
       - cancelled
@@ -287,34 +212,37 @@ columns:
     logical_name: Order Date
     type: DATE
     not_null: true
-    format: "%Y-%m-%d"           # strptime format (DATE/TIMESTAMP/TIME only)
+    format: "%Y-%m-%d"           # Expected date format (for DATE, TIMESTAMP, TIME columns)
 
-# --- Table-level constraints ---
+# --- Table-level rules ---
 table_constraints:
+  # Columns that uniquely identify each row (no duplicates allowed)
   primary_key:
-    columns: [order_id]           # Primary key (single or composite)
+    columns: [order_id]
 
+  # Column combinations where duplicate values are not allowed
   unique:
-    - columns: [order_id, user_id]  # Unique constraint
+    - columns: [order_id, user_id]
 
+  # Columns whose values must exist in another table
   foreign_keys:
-    - columns: [user_id]           # FK source columns
+    - columns: [user_id]           # Column in this table
       references:
-        table: users               # Referenced table (must be defined in another YAML)
-        columns: [user_id]         # Referenced columns
+        table: users               # The other table (must have its own YAML)
+        columns: [user_id]         # Matching column in the other table
 
-  # User-defined SQL checks
+  # Custom validation rules written in SQL
   checks:
     - description: Amount must be non-negative
       query: "SELECT COUNT(*) FROM {table} WHERE amount < 0"
-      expect_zero: true            # Pass if query returns 0
+      expect_zero: true            # true = pass when no rows match (i.e., no violations found)
 
-  # Aggregation checks (reported separately in the HTML report)
+  # Aggregation-level validation rules (shown in a separate report section)
   aggregation_checks: []
 
-# --- Export configuration ---
+# --- Export settings (optional) ---
 export:
-  partition_by: []                 # Columns for Hive-style Parquet partitioning
+  partition_by: []                 # Split exported Parquet files by these columns
 ```
 
 #### Column Definition Reference
@@ -323,50 +251,54 @@ export:
 |------------------|------------|----------|---------------------------------------------------------|
 | `name`           | `string`   | Yes      | Column name matching data file headers                  |
 | `logical_name`   | `string`   | Yes      | Human-readable name for reports                         |
-| `type`           | `string`   | Yes      | DuckDB type (e.g. `INTEGER`, `VARCHAR`, `DOUBLE`, `DATE`) |
-| `not_null`       | `bool`     | Yes      | Whether the column has a NOT NULL constraint            |
+| `type`           | `string`   | Yes      | Data type (e.g. `INTEGER`, `VARCHAR`, `DOUBLE`, `DATE`) |
+| `not_null`       | `bool`     | Yes      | `true` = blank/missing values are not allowed           |
 | `description`    | `string`   | No       | Optional description                                    |
-| `allowed_values` | `string[]` | No       | Enumerated values; rows not matching are flagged NG     |
-| `format`         | `string`   | No       | strptime pattern for DATE/TIMESTAMP/TIME columns        |
+| `allowed_values` | `string[]` | No       | List of accepted values; other values are flagged as NG |
+| `format`         | `string`   | No       | Expected date/time format (e.g. `"%Y-%m-%d"`) for DATE/TIMESTAMP/TIME columns |
 
 #### Table Constraints Reference
 
-| Constraint      | Field          | Description                                                 |
-|-----------------|----------------|-------------------------------------------------------------|
-| `primary_key`   | `columns`      | One or more columns forming the primary key                 |
-| `unique`        | `columns`      | One or more columns that must be unique together            |
-| `foreign_keys`  | `columns`, `references.table`, `references.columns` | FK relationship to another table |
-| `checks`        | `description`, `query`, `expect_zero`, `params` | User-defined SQL check         |
-| `aggregation_checks` | (same as `checks`) | Aggregation checks reported in a separate section    |
+| Rule                 | What it does                                                               |
+|----------------------|----------------------------------------------------------------------------|
+| `primary_key`        | Ensures each row is uniquely identified — no duplicate values allowed in these columns |
+| `unique`             | Ensures a combination of columns has no duplicate values                   |
+| `foreign_keys`       | Ensures values in these columns exist in the referenced table (e.g. every `user_id` in orders must exist in the users table) |
+| `checks`             | Custom SQL queries to validate data (see below)                           |
+| `aggregation_checks` | Same as `checks`, but results appear in a separate section of the report  |
 
 #### User-Defined Checks
 
-Use `{table}` as a placeholder for the quoted table name in queries:
+Write custom validation rules using SQL. Use `{table}` as a placeholder for the table name:
 
 ```yaml
-# Check that amount is non-negative
 checks:
+  # Flag rows where amount is negative
   - description: Amount must be non-negative
     query: "SELECT COUNT(*) FROM {table} WHERE amount < 0"
-    expect_zero: true
+    expect_zero: true     # true  → pass when the query returns 0 (no violations)
+                          # false → pass when the query returns non-zero
 
-# Check that at least one row exists
+  # Ensure the table has at least one row
   - description: Table must not be empty
     query: "SELECT COUNT(*) FROM {table}"
     expect_zero: false
 
-# Check with parameterized allowed values
+  # Check with parameterized allowed values
   - description: Status must be valid
     query: "SELECT COUNT(*) FROM {table} WHERE status NOT IN (SELECT UNNEST(?::VARCHAR[]))"
     expect_zero: true
     params: [["pending", "shipped", "cancelled"]]
 ```
 
+> **Tip:** `expect_zero: true` means "this query counts violations — pass when zero violations are found."
+> `expect_zero: false` means "this query counts expected rows — pass when at least one row is found."
+
 #### Export Configuration
 
 | Field          | Type       | Default | Description                                       |
 |----------------|------------|---------|---------------------------------------------------|
-| `partition_by` | `string[]` | `[]`    | Column names for Hive-style Parquet partitioning   |
+| `partition_by` | `string[]` | `[]`    | Column names to split Parquet output files by      |
 
 ### 3.5 Configure config.yaml
 
@@ -411,7 +343,9 @@ tval run --export
 
 ### 3.7 Define Relations (Optional)
 
-To validate inter-table relationship cardinalities, create a `relations.yaml` file and reference it in `config.yaml`:
+Relations let you verify how tables are connected. For example, you can check that every `user_id` in the orders table actually exists in the users table.
+
+To enable relation validation, create a `relations.yaml` file and reference it in `config.yaml`:
 
 ```yaml
 # config.yaml
@@ -421,6 +355,7 @@ relations_path: ./tval/relations.yaml
 ```yaml
 # relations.yaml
 relations:
+  # "One user can have many orders"
   - name: users-orders
     cardinality: "1:N"
     from:
@@ -430,6 +365,7 @@ relations:
       table: orders
       columns: [user_id]
 
+  # "One order can have many line items"
   - name: orders-order_details
     cardinality: "1:N"
     from:
@@ -442,12 +378,12 @@ relations:
 
 #### Supported Cardinalities
 
-| Cardinality | Checks Performed | Count |
-|-------------|------------------|-------|
-| `1:1` | from uniqueness + to uniqueness + bidirectional referential integrity | 4 |
-| `1:N` | from (1-side) uniqueness + to→from referential integrity | 2 |
-| `N:1` | to (1-side) uniqueness + from→to referential integrity | 2 |
-| `N:N` | bidirectional referential integrity | 2 |
+| Cardinality | Meaning | What is checked | Count |
+|-------------|---------|-----------------|-------|
+| `1:1` | One row in each table matches exactly one row in the other (e.g. user ↔ profile) | No duplicates on either side + every value exists in both tables | 4 |
+| `1:N` | One row on the from-side can match many rows on the to-side (e.g. user → orders) | No duplicates on the from-side + every to-side value exists in the from table | 2 |
+| `N:1` | Many rows on the from-side match one row on the to-side (e.g. orders → user) | No duplicates on the to-side + every from-side value exists in the to table | 2 |
+| `N:N` | Many-to-many (e.g. students ↔ courses) | Every value on each side exists in the other table | 2 |
 
 #### Relation Definition Reference
 
@@ -460,7 +396,7 @@ relations:
 | `to.table`    | `string`   | Yes      | Table name (must match a schema YAML definition)      |
 | `to.columns`  | `string[]` | Yes      | Column(s) on the to-side of the relation              |
 
-Relation checks follow the same skip logic as table checks: if either table has load errors, all checks for that relation are marked `SKIPPED`. NULL values are excluded from referential integrity checks (consistent with SQL FK semantics).
+> **Note:** If either table has data loading errors, all checks for that relation are marked `SKIPPED` (since the data is incomplete). Blank (NULL) values are excluded from cross-table existence checks.
 
 ### 3.8 Understanding the HTML Report
 
@@ -478,12 +414,12 @@ The generated HTML report contains the following sections:
 
 #### Status Definitions
 
-| Status      | Meaning                                                            |
-|-------------|------------------------------------------------------------------- |
-| **OK**      | Check passed (or table has no validation failures)                 |
-| **NG**      | Check failed (e.g. unexpected values found, constraint violated)   |
-| **ERROR**   | Check execution failed (e.g. SQL error)                            |
-| **SKIPPED** | Check was skipped due to upstream load errors                      |
+| Status      | Icon | Meaning                                                          |
+|-------------|------|------------------------------------------------------------------|
+| **OK**      | ✅   | Check passed — no issues found                                  |
+| **NG**      | ❌   | Check failed — data does not meet the expected rule (e.g. duplicates found, invalid values, constraint violation) |
+| **ERROR**   | ❌   | Check could not run — typically caused by a bug in the SQL query or an internal error. Review the error message and fix the query |
+| **SKIPPED** | ⚠️   | Check was not executed — this happens when data files failed to load. Fix the load errors first, then re-run to see these check results |
 
 ### 3.9 Parquet Export
 
@@ -579,6 +515,54 @@ Matrix: **Python 3.10** and **Python 3.12** on `ubuntu-latest`.
 
 ### 4.5 Architecture Overview
 
+#### Repository Layout
+
+```
+tval/
+├── src/tval/
+│   ├── __init__.py          # Package marker
+│   ├── cli.py               # CLI entry point (argparse)
+│   ├── init.py              # tval init scaffolding
+│   ├── main.py              # Pipeline orchestration
+│   ├── parser.py            # YAML schema → Pydantic models
+│   ├── builder.py           # DDL generation + topological sort
+│   ├── loader.py            # CSV/XLSX/Parquet → DuckDB INSERT
+│   ├── checker.py           # Validation check execution
+│   ├── relation.py          # Inter-table relation cardinality validation
+│   ├── profiler.py          # Column statistics computation
+│   ├── exporter.py          # Parquet export with partitioning
+│   ├── reporter.py          # HTML report generation
+│   ├── logger.py            # Structured JSON logging
+│   └── templates/
+│       └── report.html.j2   # Jinja2 HTML report template
+├── tests/
+├── docs/
+├── pyproject.toml           # Build config, dependencies, tool settings
+├── Dockerfile               # Development container
+├── .pre-commit-config.yaml  # Pre-commit hook configuration
+└── .github/workflows/
+    └── ci.yml               # GitHub Actions CI pipeline
+```
+
+#### Module Responsibilities
+
+| Module       | Responsibility                                                      |
+|--------------|---------------------------------------------------------------------|
+| `cli.py`     | Parse CLI arguments, dispatch to `init` or `run`                    |
+| `init.py`    | Scaffold project directories, config, and `.gitignore` entries      |
+| `main.py`    | Orchestrate the full validation pipeline end-to-end                 |
+| `parser.py`  | Define Pydantic models and load/validate YAML schema files          |
+| `builder.py` | Generate CREATE TABLE SQL, resolve FK dependency order (topo sort)  |
+| `loader.py`  | Load CSV/XLSX/Parquet files into DuckDB with encoding detection     |
+| `checker.py` | Execute allowed-value, user-defined, and aggregation checks         |
+| `relation.py`| Validate inter-table relationship cardinalities (1:1, 1:N, N:1, N:N) |
+| `profiler.py`| Compute column statistics (count, nulls, unique, mean, percentiles) |
+| `exporter.py`| Export tables to Parquet with optional Hive partitioning            |
+| `reporter.py`| Render HTML report from Jinja2 template                             |
+| `logger.py`  | Provide structured JSON logging                                     |
+
+#### Pipeline Flow
+
 ```
                    cli.py
                   /      \
@@ -595,7 +579,7 @@ Matrix: **Python 3.10** and **Python 3.12** on `ubuntu-latest`.
                    All modules --> logger.py
 ```
 
-Key design decisions:
+#### Key Design Decisions
 
 - **SQL injection prevention** - All identifiers pass through `quote_identifier()` in `builder.py`, which validates against a strict regex and wraps in double quotes.
 - **Connection separation** - Data loading uses a read-write connection (`conn_rw`); checks, profiling, and export use a read-only connection (`conn_ro`).
