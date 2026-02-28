@@ -7,6 +7,7 @@ and structured error reporting for load failures.
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,10 +53,11 @@ def _resolve_csv_path(
     Raises:
         EncodingDetectionError: If detection confidence is below the threshold.
     """
+    _CHARDET_SAMPLE_SIZE = 8192
     with open(file_path, "rb") as f:
-        raw = f.read()
+        sample = f.read(_CHARDET_SAMPLE_SIZE)
 
-    detected = chardet.detect(raw)
+    detected = chardet.detect(sample)
     encoding: str = detected.get("encoding") or "utf-8"
     confidence: float = detected.get("confidence") or 0.0
 
@@ -66,6 +68,9 @@ def _resolve_csv_path(
             f"threshold={confidence_threshold})"
         )
 
+    if encoding.lower().replace("-", "") in ("utf8", "ascii"):
+        return file_path, False
+
     logger.info(
         "Converting CSV to temporary UTF-8 file",
         extra={
@@ -74,15 +79,14 @@ def _resolve_csv_path(
             "confidence": detected.get("confidence"),
         },
     )
-    text = raw.decode(encoding, errors="replace")
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         suffix=".csv",
         delete=False,
     )
-    tmp.write(text)
-    tmp.close()
+    with open(file_path, "r", encoding=encoding, errors="replace") as src, tmp:
+        shutil.copyfileobj(src, tmp)
     return tmp.name, True
 
 

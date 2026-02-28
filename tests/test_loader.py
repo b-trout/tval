@@ -210,16 +210,13 @@ class TestLoadFiles:
 class TestResolveCsvPathUtf8:
     """Tests for _resolve_csv_path with UTF-8 content."""
 
-    def test_resolve_csv_path_utf8_creates_tmp(self, tmp_path: Path) -> None:
-        """UTF-8 CSV should also create a temporary UTF-8 copy."""
+    def test_resolve_csv_path_utf8_returns_original(self, tmp_path: Path) -> None:
+        """UTF-8 CSV should be returned as-is without a temp file."""
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,name\n1,Alice\n", encoding="utf-8")
         resolved, is_tmp = _resolve_csv_path(str(csv_file), confidence_threshold=0.5)
-        assert resolved != str(csv_file)
-        assert is_tmp is True
-        # Verify temp file content matches
-        assert Path(resolved).read_text(encoding="utf-8") == "id,name\n1,Alice\n"
-        Path(resolved).unlink(missing_ok=True)
+        assert resolved == str(csv_file)
+        assert is_tmp is False
 
     def test_resolve_csv_path_sjis_creates_tmp(self, tmp_path: Path) -> None:
         """SJIS CSV should be converted to a temporary UTF-8 file."""
