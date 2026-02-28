@@ -1033,9 +1033,10 @@ def load_files(
 
 ```python
 # CSV（文字コード検出・変換あり。詳細は後述）
+# 常にUTF-8一時ファイルを作成し、明示的なカラム型指定でread_csvに渡す
 conn.execute(
-    f"INSERT INTO {quote_identifier(table_name)} SELECT * FROM read_csv_auto(?, header=true)",
-    [file_path]   # file_pathはUTF-8保証済みのパスを渡す
+    f"INSERT INTO {quote_identifier(table_name)} SELECT * FROM read_csv(?, header=true, columns={columns_override})",
+    [resolved_path]   # resolved_pathはUTF-8一時ファイルのパス
 )
 
 # Parquet
@@ -1057,7 +1058,7 @@ conn.execute(
 
 `format`指定カラムは以下の手順で処理する。
 
-1. `read_csv_auto`/`read_parquet`/`read_xlsx`の`columns`パラメータで当該カラムの型を`VARCHAR`に上書きして読む
+1. `read_csv`/`read_parquet`/`read_xlsx`の`columns`パラメータで当該カラムの型を`VARCHAR`に上書きして読む
 2. SELECTで`STRPTIME(col, format)::TYPE`にキャストする
 
 ```python
@@ -1087,13 +1088,11 @@ def _build_insert_select(tdef: TableDef) -> str:
 
 def _build_columns_override(tdef: TableDef) -> str:
     """
-    read_csv_auto/read_xlsxのcolumnsパラメータ文字列を生成する。
+    read_csv/read_xlsxのcolumnsパラメータ文字列を生成する。
+    常にテーブル定義の型を明示的に指定する。
     formatが指定されたカラムはVARCHARに上書きする。
-    formatがなければ空文字列を返す（columnsパラメータ不要）。
     """
     format_cols = {col.name for col in tdef.columns if col.format}
-    if not format_cols:
-        return ""
 
     entries = []
     for col in tdef.columns:
@@ -1109,7 +1108,7 @@ INSERT INTO "orders"
 SELECT
     "order_id",
     STRPTIME("created_at", '%Y/%m/%d %H:%M:%S')::TIMESTAMP AS "created_at"
-FROM read_csv_auto(
+FROM read_csv(
     ?,
     header=true,
     columns={'order_id': 'INTEGER', 'created_at': 'VARCHAR'}
@@ -1118,7 +1117,7 @@ FROM read_csv_auto(
 
 **CSVの文字コード検出・変換**
 
-CSVファイルのロード前に以下の処理を行う。`chardet`で文字コードを検出し、UTF-8でなければUTF-8に変換した一時ファイルを作成してから`read_csv_auto`に渡す。一時ファイルは`load_files()`の終了時（成功・失敗問わず）に削除する。
+CSVファイルのロード前に以下の処理を行う。`chardet`で文字コードを検出し、常にUTF-8に変換した一時ファイルを作成してから`read_csv`に渡す。一時ファイルは`_insert_file()`の終了時（成功・失敗問わず）に削除する。
 
 ```python
 import chardet
@@ -1134,14 +1133,12 @@ def _resolve_csv_path(
     confidence_threshold: float,
 ) -> tuple[str, bool]:
     """
-    CSVファイルの文字コードを検出する。
-    UTF-8（またはASCII）であればそのままのパスを返す。
-    それ以外であればUTF-8に変換した一時ファイルのパスを返す。
+    CSVファイルの文字コードを検出し、常にUTF-8の一時ファイルを作成する。
 
     信頼度がconfidence_threshold未満の場合はEncodingDetectionErrorを送出する。
 
     Returns:
-        (使用するファイルパス, 一時ファイルかどうか)
+        (一時ファイルのパス, True)
 
     Raises:
         EncodingDetectionError: 信頼度が閾値未満の場合
@@ -1161,11 +1158,7 @@ def _resolve_csv_path(
             f"threshold={confidence_threshold})"
         )
 
-    # ASCII はUTF-8のサブセットのためそのまま使用
-    if encoding.lower().replace("-", "") in ("utf8", "ascii"):
-        return file_path, False
-
-    # UTF-8以外は変換して一時ファイルに書き出す
+    # 常にUTF-8一時ファイルに変換して書き出す
     text = raw.decode(encoding, errors="replace")
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
@@ -1197,7 +1190,7 @@ for file_path in csv_files:
         resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
         conn.execute(
             f"INSERT INTO {quote_identifier(table_name)} "
-            f"SELECT * FROM read_csv_auto(?, header=true)",
+            f"SELECT * FROM read_csv(?, header=true, columns={columns_override})",
             [resolved_path]
         )
     except EncodingDetectionError as e:
@@ -1710,7 +1703,7 @@ f'"{validated_name}"'
 全ての値は`?`プレースホルダでバインドする。
 
 ```python
-conn.execute("SELECT * FROM read_csv_auto(?, header=true)", [file_path])
+conn.execute("SELECT * FROM read_csv(?, header=true, columns=...)", [file_path])
 ```
 
 ### `checks`/`aggregation_checks`クエリについて

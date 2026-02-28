@@ -90,10 +90,10 @@ SQLの値は必ず `?` プレースホルダでバインドする。
 
 ```python
 # 正しい
-conn.execute("SELECT * FROM read_csv_auto(?)", [file_path])
+conn.execute("SELECT * FROM read_csv(?, header=true, columns=...)", [file_path])
 
 # 禁止
-conn.execute(f"SELECT * FROM read_csv_auto('{file_path}')")
+conn.execute(f"SELECT * FROM read_csv('{file_path}', header=true, columns=...)")
 ```
 
 ### ロギング
