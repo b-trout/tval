@@ -75,3 +75,69 @@ class TestIntegration:
         parquet_dir = tmp_path / "tval" / "output" / "parquet"
         orders_parquet = parquet_dir / "orders" / "orders.parquet"
         assert orders_parquet.exists()
+
+    def test_run_with_type_mismatch(self, tmp_path: Path) -> None:
+        """Type mismatch data should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        # Overwrite orders.csv with type-mismatch data (string in integer column)
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\nnot_an_int,1,100.0,pending\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content or "ERROR" in content
+
+    def test_run_with_null_violation(self, tmp_path: Path) -> None:
+        """NOT NULL violation should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        users_csv = tmp_path / "tval" / "data" / "users" / "users.csv"
+        users_csv.write_text(
+            "user_id,name,email\n,Alice,alice@example.com\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content or "ERROR" in content
+
+    def test_run_with_fk_violation(self, tmp_path: Path) -> None:
+        """Foreign key violation should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,999,100.0,pending\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content or "ERROR" in content
+
+    def test_run_with_duplicate_pk(self, tmp_path: Path) -> None:
+        """Duplicate primary key should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        users_csv = tmp_path / "tval" / "data" / "users" / "users.csv"
+        users_csv.write_text(
+            "user_id,name,email\n1,Alice,alice@example.com\n1,Bob,bob@example.com\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content or "ERROR" in content
+
+    def test_run_with_allowed_values_violation(self, tmp_path: Path) -> None:
+        """Allowed values violation should result in check NG."""
+        config_path = _setup_project(tmp_path)
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,1,100.0,invalid_status\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content

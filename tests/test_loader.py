@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import pytest
 
-from tval.loader import EncodingDetectionError, _resolve_csv_path, parse_duckdb_error
+from tval.loader import (
+    EncodingDetectionError,
+    _col_expr,
+    _resolve_csv_path,
+    load_files,
+    parse_duckdb_error,
+)
+from tval.parser import ColumnDef, TableDef
 
 
 class TestParseDuckdbError:
@@ -81,3 +89,135 @@ class TestResolveCsvPath:
             EncodingDetectionError, match="confidence is below threshold"
         ):
             _resolve_csv_path(str(csv_file), confidence_threshold=0.99)
+
+
+def _make_tdef(tmp_path: Path, source_dir: str | None = None) -> TableDef:
+    """Create a minimal TableDef for loader tests."""
+    d = Path(source_dir) if source_dir else (tmp_path / "data" / "t")
+    d.mkdir(parents=True, exist_ok=True)
+    return TableDef.model_validate(
+        {
+            "table": {
+                "name": "t",
+                "description": "test table",
+                "source_dir": str(d),
+            },
+            "columns": [
+                {
+                    "name": "id",
+                    "logical_name": "ID",
+                    "type": "INTEGER",
+                    "not_null": True,
+                },
+                {
+                    "name": "name",
+                    "logical_name": "Name",
+                    "type": "VARCHAR",
+                    "not_null": False,
+                },
+            ],
+            "table_constraints": {
+                "primary_key": [],
+                "unique": [],
+                "foreign_keys": [],
+                "checks": [],
+                "aggregation_checks": [],
+            },
+        },
+        context={"project_root": str(tmp_path)},
+    )
+
+
+class TestLoadFiles:
+    """Tests for load_files with actual DuckDB connections."""
+
+    def test_load_csv_file(self, tmp_path: Path) -> None:
+        """CSV files should be loaded into the table."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        csv_file = data_dir / "test.csv"
+        csv_file.write_text("id,name\n1,Alice\n2,Bob\n", encoding="utf-8")
+
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert errors == []
+        row = conn.execute('SELECT COUNT(*) FROM "t"').fetchone()
+        assert row is not None
+        assert row[0] == 2
+
+    def test_load_empty_directory(self, tmp_path: Path) -> None:
+        """Empty source directory should return NO_FILES error."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert len(errors) == 1
+        assert errors[0].error_type == "NO_FILES"
+
+    def test_load_xls_returns_unsupported(self, tmp_path: Path) -> None:
+        """.xls files should return UNSUPPORTED_FORMAT error."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "test.xls").write_bytes(b"fake xls")
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert len(errors) == 1
+        assert errors[0].error_type == "UNSUPPORTED_FORMAT"
+
+    def test_load_unsupported_extension_skipped(self, tmp_path: Path) -> None:
+        """.json files should be silently skipped (no error)."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "test.json").write_text("{}", encoding="utf-8")
+        (data_dir / "test.csv").write_text("id,name\n1,Alice\n", encoding="utf-8")
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert errors == []
+
+
+class TestResolveCsvPathUtf8:
+    """Tests for _resolve_csv_path with UTF-8 content."""
+
+    def test_resolve_csv_path_utf8_passthrough(self, tmp_path: Path) -> None:
+        """UTF-8 CSV should return the original path without conversion."""
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,name\n1,Alice\n", encoding="utf-8")
+        resolved, is_tmp = _resolve_csv_path(str(csv_file), confidence_threshold=0.5)
+        assert resolved == str(csv_file)
+        assert is_tmp is False
+
+
+class TestColExpr:
+    """Tests for _col_expr column expression building."""
+
+    def test_col_expr_without_format(self) -> None:
+        """Columns without format should return just the quoted name."""
+        col = ColumnDef(
+            name="id",
+            logical_name="ID",
+            type="INTEGER",
+            not_null=True,
+        )
+        assert _col_expr(col) == '"id"'
+
+    def test_col_expr_with_format(self) -> None:
+        """Columns with format should return STRPTIME-wrapped expression."""
+        col = ColumnDef(
+            name="created_at",
+            logical_name="Created",
+            type="DATE",
+            not_null=False,
+            format="%Y-%m-%d",
+        )
+        expr = _col_expr(col)
+        assert "STRPTIME" in expr
+        assert "%Y-%m-%d" in expr
+        assert "created_at" in expr
