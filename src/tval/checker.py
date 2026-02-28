@@ -15,6 +15,7 @@ from .builder import quote_identifier
 from .loader import LoadError
 from .logger import get_logger
 from .parser import CheckDef, ColumnDef, TableDef
+from .status import CheckStatus
 
 logger = get_logger(__name__)
 
@@ -25,9 +26,30 @@ class CheckResult:
 
     description: str
     query: str
-    status: str  # "OK" | "NG" | "SKIPPED" | "ERROR"
+    status: CheckStatus
     result_count: int | None
     message: str
+
+
+def make_skipped_result(check: CheckDef, table_name: str, message: str) -> CheckResult:
+    """Create a SKIPPED CheckResult for a check that cannot run."""
+    query = check.query
+    if "{table}" in query:
+        query = query.replace("{table}", quote_identifier(table_name))
+    logger.warning(
+        "Check skipped",
+        extra={
+            "table": table_name,
+            "check_description": check.description,
+        },
+    )
+    return CheckResult(
+        description=check.description,
+        query=query,
+        status=CheckStatus.SKIPPED,
+        result_count=None,
+        message=message,
+    )
 
 
 def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
@@ -56,11 +78,11 @@ def _execute_check(
         result = conn.execute(query, check.params or None).fetchone()
         count = int(result[0]) if result else 0
         if check.expect_zero:
-            status = "OK" if count == 0 else "NG"
+            status = CheckStatus.OK if count == 0 else CheckStatus.NG
         else:
-            status = "OK" if count > 0 else "NG"
-        message = "" if status == "OK" else f"Result count: {count}"
-        if status == "NG":
+            status = CheckStatus.OK if count > 0 else CheckStatus.NG
+        message = "" if status == CheckStatus.OK else f"Result count: {count}"
+        if status == CheckStatus.NG:
             logger.error(
                 "Check failed",
                 extra={
@@ -87,7 +109,7 @@ def _execute_check(
         return CheckResult(
             description=check.description,
             query=query,
-            status="ERROR",
+            status=CheckStatus.ERROR,
             result_count=None,
             message=str(e),
         )
@@ -108,9 +130,7 @@ def run_checks(
 
     # Skip all checks if load errors exist
     if load_errors:
-        checks_results: list[CheckResult] = []
-        agg_results: list[CheckResult] = []
-
+        skip_msg = "Skipped due to load error"
         all_checks = chain(
             (
                 _build_allowed_values_check(table_name, col)
@@ -119,45 +139,13 @@ def run_checks(
             ),
             tdef.table_constraints.checks,
         )
-
-        for check in all_checks:
-            query = check.query.replace("{table}", quote_identifier(table_name))
-            logger.warning(
-                "Check skipped",
-                extra={
-                    "table": table_name,
-                    "check_description": check.description,
-                },
-            )
-            checks_results.append(
-                CheckResult(
-                    description=check.description,
-                    query=query,
-                    status="SKIPPED",
-                    result_count=None,
-                    message="Skipped due to load error",
-                )
-            )
-
-        for check in tdef.table_constraints.aggregation_checks:
-            query = check.query.replace("{table}", quote_identifier(table_name))
-            logger.warning(
-                "Check skipped",
-                extra={
-                    "table": table_name,
-                    "check_description": check.description,
-                },
-            )
-            agg_results.append(
-                CheckResult(
-                    description=check.description,
-                    query=query,
-                    status="SKIPPED",
-                    result_count=None,
-                    message="Skipped due to load error",
-                )
-            )
-
+        checks_results: list[CheckResult] = [
+            make_skipped_result(check, table_name, skip_msg) for check in all_checks
+        ]
+        agg_results: list[CheckResult] = [
+            make_skipped_result(check, table_name, skip_msg)
+            for check in tdef.table_constraints.aggregation_checks
+        ]
         logger.info("Checks completed", extra={"table": table_name})
         return checks_results, agg_results
 

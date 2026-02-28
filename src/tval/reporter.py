@@ -16,6 +16,7 @@ from .exporter import ExportResult
 from .loader import LoadError
 from .parser import TableDef
 from .profiler import ColumnProfile
+from .status import CheckStatus
 
 
 @dataclass
@@ -30,17 +31,17 @@ class TableReport:
     export_result: ExportResult | None
 
     @property
-    def overall_status(self) -> str:
-        """Return 'NG' if any load errors or check failures exist, otherwise 'OK'."""
+    def overall_status(self) -> CheckStatus:
+        """Return NG if any load errors or check failures exist, otherwise OK."""
         if self.load_errors:
-            return "NG"
+            return CheckStatus.NG
         for cr in self.check_results:
-            if cr.status in ("NG", "ERROR"):
-                return "NG"
+            if cr.status in (CheckStatus.NG, CheckStatus.ERROR):
+                return CheckStatus.NG
         for cr in self.agg_check_results:
-            if cr.status in ("NG", "ERROR"):
-                return "NG"
-        return "OK"
+            if cr.status in (CheckStatus.NG, CheckStatus.ERROR):
+                return CheckStatus.NG
+        return CheckStatus.OK
 
 
 def generate_report(
@@ -60,16 +61,18 @@ def generate_report(
 
     summary = {
         "total": len(table_reports),
-        "ok": sum(1 for r in table_reports if r.overall_status == "OK"),
-        "ng": sum(1 for r in table_reports if r.overall_status == "NG"),
+        "ok": sum(1 for r in table_reports if r.overall_status == CheckStatus.OK),
+        "ng": sum(1 for r in table_reports if r.overall_status == CheckStatus.NG),
     }
 
     rel_results = relation_check_results or []
     relation_summary = {
         "total": len(rel_results),
-        "ok": sum(1 for r in rel_results if r.status == "OK"),
-        "ng": sum(1 for r in rel_results if r.status in ("NG", "ERROR")),
-        "skipped": sum(1 for r in rel_results if r.status == "SKIPPED"),
+        "ok": sum(1 for r in rel_results if r.status == CheckStatus.OK),
+        "ng": sum(
+            1 for r in rel_results if r.status in (CheckStatus.NG, CheckStatus.ERROR)
+        ),
+        "skipped": sum(1 for r in rel_results if r.status == CheckStatus.SKIPPED),
     }
 
     html = template.render(

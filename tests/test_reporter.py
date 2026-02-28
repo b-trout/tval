@@ -8,6 +8,7 @@ from tval.checker import CheckResult
 from tval.loader import LoadError
 from tval.parser import TableDef
 from tval.reporter import TableReport, generate_report
+from tval.status import CheckStatus
 
 
 def _make_tdef(tmp_path: Path) -> TableDef:
@@ -41,7 +42,7 @@ def _make_tdef(tmp_path: Path) -> TableDef:
     )
 
 
-def _make_check_result(status: str) -> CheckResult:
+def _make_check_result(status: CheckStatus) -> CheckResult:
     return CheckResult(
         description="test check",
         query="SELECT 1",
@@ -59,12 +60,12 @@ class TestReporter:
         report = TableReport(
             table_def=_make_tdef(tmp_path),
             load_errors=[],
-            check_results=[_make_check_result("OK")],
+            check_results=[_make_check_result(CheckStatus.OK)],
             agg_check_results=[],
             profiles=[],
             export_result=None,
         )
-        assert report.overall_status == "OK"
+        assert report.overall_status == CheckStatus.OK
 
     def test_overall_status_ng_on_load_errors(self, tmp_path: Path) -> None:
         """Load errors should yield NG."""
@@ -84,38 +85,38 @@ class TestReporter:
             profiles=[],
             export_result=None,
         )
-        assert report.overall_status == "NG"
+        assert report.overall_status == CheckStatus.NG
 
     def test_overall_status_ng_on_check_failure(self, tmp_path: Path) -> None:
         """NG check result should yield NG."""
         report = TableReport(
             table_def=_make_tdef(tmp_path),
             load_errors=[],
-            check_results=[_make_check_result("NG")],
+            check_results=[_make_check_result(CheckStatus.NG)],
             agg_check_results=[],
             profiles=[],
             export_result=None,
         )
-        assert report.overall_status == "NG"
+        assert report.overall_status == CheckStatus.NG
 
     def test_overall_status_ng_on_check_error(self, tmp_path: Path) -> None:
         """ERROR check result should yield NG overall."""
         report = TableReport(
             table_def=_make_tdef(tmp_path),
             load_errors=[],
-            check_results=[_make_check_result("ERROR")],
+            check_results=[_make_check_result(CheckStatus.ERROR)],
             agg_check_results=[],
             profiles=[],
             export_result=None,
         )
-        assert report.overall_status == "NG"
+        assert report.overall_status == CheckStatus.NG
 
     def test_generate_report_creates_file(self, tmp_path: Path) -> None:
         """generate_report should create an HTML file."""
         report = TableReport(
             table_def=_make_tdef(tmp_path),
             load_errors=[],
-            check_results=[_make_check_result("OK")],
+            check_results=[_make_check_result(CheckStatus.OK)],
             agg_check_results=[],
             profiles=[],
             export_result=None,
