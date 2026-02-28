@@ -24,14 +24,15 @@
 2.  parser.py + tests/test_parser.py
 3.  builder.py + tests/test_builder.py
 4.  loader.py + tests/test_loader.py
-5.  checker.py
-6.  profiler.py
-7.  exporter.py
-8.  reporter.py + templates/report.html.j2
-9.  main.py + tests/test_integration.py
-10. init.py
-11. cli.py
-12. pyproject.toml
+5.  checker.py + tests/test_checker.py
+6.  relation.py + tests/test_relation.py
+7.  profiler.py + tests/test_profiler.py
+8.  exporter.py + tests/test_exporter.py
+9.  reporter.py + templates/report.html.j2 + tests/test_reporter.py
+10. main.py + tests/test_integration.py
+11. init.py
+12. cli.py
+13. pyproject.toml
 ```
 
 各モジュールを実装したら、次のモジュールに進む前に単体で動作確認すること。
@@ -65,7 +66,7 @@ jinja2
 - `click` 等の外部CLIライブラリの使用禁止（`argparse`で実装）
 - `print()` の使用禁止（`tval init`の完了メッセージを除く。ログは`get_logger()`経由）
 - `tval init`で既存ディレクトリへの上書き禁止
-- `checker.py`・`profiler.py`へのread/write接続(`conn_rw`)の受け渡し禁止。必ずread_only接続(`conn_ro`)を渡すこと
+- `checker.py`・`profiler.py`・`relation.py`へのread/write接続(`conn_rw`)の受け渡し禁止。必ずread_only接続(`conn_ro`)を渡すこと
 - `allowed_values`チェックをユーザーに手書きさせる実装禁止。`checker.py`が`ColumnDef.allowed_values`から自動生成すること
 - `DATETIME_TYPES`を`loader.py`と`profiler.py`で二重定義禁止。どちらかに定義してもう一方でインポートすること
 - `format`指定カラムのINSERTで`SELECT *`を使用禁止。`_build_insert_select()`で明示的なSELECTを生成すること
@@ -184,15 +185,38 @@ strict = true
 - 未知のエラーメッセージが`UNKNOWN`として返り、`raw_message`が保持されること
 - `_resolve_csv_path()`に信頼度が閾値未満のファイルを渡した場合に`EncodingDetectionError`が送出されること
 
+**`tests/test_checker.py`**
+- checksクエリ実行時のOK/NG/ERROR判定
+- ロードエラー時のSKIPPED判定
+- allowed_valuesの自動チェック生成
+
+**`tests/test_relation.py`**
+- YAML正常読込・不正カーディナリティでのバリデーションエラー
+- 未定義テーブル/カラム参照でのValueError
+- 各カーディナリティ（1:1, 1:N, N:1）の正常・異常系
+- ロードエラー時のSKIPPED
+- NULL値の参照整合性除外
+
+**`tests/test_profiler.py`**
+- 数値型・非数値型のプロファイリング
+- エラー時のColumnProfile.errorフィールド記録
+
+**`tests/test_exporter.py`**
+- パーティションなし・あり・SKIPPED のエクスポート
+
+**`tests/test_reporter.py`**
+- HTMLレポート生成・overall_status判定
+
 ### 結合テスト
 
 **`tests/test_integration.py`**
 
-正常系のエンドツーエンドテストを1本のみ実装する。
+正常系のエンドツーエンドテストおよび各種異常系を実装する。
 
 - `tests/fixtures/`に最小限のテスト用CSVとスキーマYAMLを用意する
 - `run(config_path)`を呼び出し、`report.html`が生成されることを確認する
 - `tval run --export`相当の`run(config_path, export=True)`を呼び出し、Parquetが生成されることを確認する
+- relations.yaml付きのフルパイプライン実行テスト
 
 ### 完了条件への追加
 
@@ -238,3 +262,7 @@ strict = true
 - [ ] `partition_by`未指定時に `{table_name}.parquet` 単一ファイルで書き出される
 - [ ] 1テーブルでもNGがある状態で `tval run --export` を実行した場合、全テーブルのエクスポートがSKIPPEDになる
 - [ ] エクスポート結果（OK/SKIPPED/ERROR）がHTMLレポートに表示される
+- [ ] `relations_path`を指定した場合、リレーションカーディナリティ検証が実行される
+- [ ] リレーション検証結果（OK/NG/SKIPPED/ERROR）がHTMLレポートのリレーションセクションに表示される
+- [ ] リレーション検証でNG/ERRORがある場合、`--export`時に全テーブルのエクスポートがSKIPPEDになる
+- [ ] ロードエラーのあるテーブルを含むリレーションの全チェックがSKIPPEDとなる

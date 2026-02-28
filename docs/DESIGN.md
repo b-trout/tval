@@ -46,26 +46,32 @@
 ### 処理フロー
 
 ```
-[config.yaml]          [schema/*.yaml]
-      │                      │
-      │              [Pydanticバリデーション]
-      │                      │
-      └──────────┬───────────┘
-                 │
-         [DAGによるロード順決定]
-         （外部キー依存関係を解決）
-                 │
-         [DuckDBテーブルをCREATE]
-         （PK / UNIQUE / FK / NOT NULL 制約付き）
-                 │
-         [ファイルを1件ずつINSERT]
-         （エラーをキャッチ・パース）
-                 │
-         [ロジックバリデーション実行]
-         （checks / aggregation_checks）
+[config.yaml]          [schema/*.yaml]       [relations.yaml（任意）]
+      │                      │                        │
+      │              [Pydanticバリデーション]          │
+      │                      │                        │
+      └──────────┬───────────┘                        │
+                 │                                    │
+         [DAGによるロード順決定]                       │
+         （外部キー依存関係を解決）                    │
+                 │                                    │
+         [DuckDBテーブルをCREATE]                      │
+         （PK / UNIQUE / FK / NOT NULL 制約付き）      │
+                 │                                    │
+         [ファイルを1件ずつINSERT]                     │
+         （エラーをキャッチ・パース）                  │
+                 │                                    │
+         [ロジックバリデーション実行]                  │
+         （checks / aggregation_checks）              │
+                 │                                    │
+         [リレーションカーディナリティ検証]────────────┘
+         （一意性・参照整合性チェック）
                  │
          [基本統計量算出]
          （共通統計: 一括SQL / 数値型追加統計: 列ごと個別SQL）
+                 │
+         [Parquetエクスポート（任意）]
+         （テーブル＋リレーション結果でゲート）
                  │
          [HTMLレポート生成]
 ```
@@ -98,7 +104,9 @@ tval/                        # リポジトリルート
 │       ├── builder.py       # CREATE TABLE生成・DAGロード順決定
 │       ├── loader.py        # ファイルINSERT・DuckDBエラーパース
 │       ├── checker.py       # ロジックバリデーション実行
+│       ├── relation.py      # テーブル間リレーションカーディナリティ検証
 │       ├── profiler.py      # 基本統計量算出
+│       ├── exporter.py      # Parquetエクスポート
 │       ├── reporter.py      # HTMLレポート生成
 │       ├── logger.py        # 構造化JSONロガー
 │       └── templates/
@@ -565,6 +573,7 @@ database_path: ./tval/work.duckdb
 schema_dir: ./tval/schema
 output_path: ./tval/output/report.html
 encoding_confidence_threshold: 0.8   # chardet信頼度の閾値（0.0〜1.0）。省略時は0.8
+# relations_path: ./tval/relations.yaml  # リレーション定義（任意）
 ```
 
 | キー | 型 | 必須 | 説明 |
@@ -573,6 +582,7 @@ encoding_confidence_threshold: 0.8   # chardet信頼度の閾値（0.0〜1.0）�
 | `schema_dir` | string | ✅ | `*.yaml`を格納したディレクトリ。サブディレクトリは読まない |
 | `output_path` | string | ✅ | レポートHTML出力先。親ディレクトリが存在しない場合は作成する |
 | `encoding_confidence_threshold` | float | ❌ | chardetの信頼度閾値（0.0〜1.0）。省略時は`0.8`。この値未満の場合はLoadErrorとして記録しロードをスキップする |
+| `relations_path` | string | ❌ | テーブル間リレーション定義ファイル（`relations.yaml`）のパス。省略時はリレーション検証をスキップ |
 
 ---
 
@@ -732,6 +742,78 @@ export:                             # optional。省略時はエクスポート�
 
 ---
 
+## 6.1 リレーションYAML仕様（`relations.yaml`）
+
+テーブル間のカーディナリティ（1:1, 1:N, N:1, N:N）を定義するオプショナルなファイル。`config.yaml`の`relations_path`で参照する。
+
+### 完全な例
+
+```yaml
+relations:
+  - name: users-orders
+    cardinality: "1:N"
+    from:
+      table: users
+      columns: [user_id]
+    to:
+      table: orders
+      columns: [user_id]
+
+  - name: users-profiles
+    cardinality: "1:1"
+    from:
+      table: users
+      columns: [user_id]
+    to:
+      table: profiles
+      columns: [user_id]
+```
+
+### フィールド定義
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `name` | string | ✅ | リレーション名（レポート表示用） |
+| `cardinality` | string | ✅ | `"1:1"`, `"1:N"`, `"N:1"`, `"N:N"` のいずれか |
+| `from.table` | string | ✅ | from側テーブル名（`schema_dir`に定義が必要） |
+| `from.columns` | string[] | ✅ | from側のカラム名リスト |
+| `to.table` | string | ✅ | to側テーブル名（`schema_dir`に定義が必要） |
+| `to.columns` | string[] | ✅ | to側のカラム名リスト |
+
+### カーディナリティ別の検証内容
+
+| カーディナリティ | 検証内容 | チェック数 |
+|---|---|---|
+| `1:1` | from側一意性 + to側一意性 + from→to参照整合性 + to→from参照整合性 | 4 |
+| `1:N` | from側（1側）一意性 + to→from参照整合性 | 2 |
+| `N:1` | to側（1側）一意性 + from→to参照整合性 | 2 |
+| `N:N` | from→to参照整合性 + to→from参照整合性 | 2 |
+
+### 検証SQL
+
+**一意性チェック**: キー列の組み合わせに重複がないことを確認
+```sql
+SELECT COUNT(*) FROM (
+  SELECT col1, col2 FROM table GROUP BY col1, col2 HAVING COUNT(*) > 1
+)
+```
+
+**参照整合性チェック**: source側の値がtarget側に存在することを確認（NULLは除外）
+```sql
+SELECT COUNT(*) FROM source s
+LEFT JOIN target t ON s.col = t.col
+WHERE s.col IS NOT NULL AND t.col IS NULL
+```
+
+### 注意事項
+
+- `from`はPython予約語のため、内部ではYAML読込時に`from` → `from_`にリネームして処理する
+- NULL値は参照整合性チェックから除外される（SQL FK標準に準拠）
+- いずれかのテーブルにロードエラーがある場合、そのリレーションの全チェックは`SKIPPED`となる
+- リレーション検証結果はテーブル別セクションではなく、独立した「リレーションカーディナリティ検証」セクションとしてレポートに表示される
+
+---
+
 ## 7. データモデル仕様
 
 `validator/parser.py`に実装する。全モデルはPydantic `BaseModel`を継承する。
@@ -797,6 +879,28 @@ class TableDef(BaseModel):
     #   - FK参照先テーブルの存在確認は build_load_order() 側で行うため、ここでは行わない
 ```
 
+### リレーションデータモデル
+
+`tval/relation.py`に実装する。全モデルはPydantic `BaseModel`を継承する。
+
+```python
+class RelationEndpoint(BaseModel):
+    """リレーションの片側（テーブル＋カラム）"""
+    table: str
+    columns: list[str]
+
+class RelationDef(BaseModel):
+    """リレーション定義"""
+    name: str
+    cardinality: Literal["1:1", "1:N", "N:1", "N:N"]
+    from_: RelationEndpoint  # YAML上は "from"。読込時にリネーム
+    to: RelationEndpoint
+
+class RelationsConfig(BaseModel):
+    """relations.yaml のトップレベルモデル"""
+    relations: list[RelationDef]
+```
+
 ### バリデーション責務の分離
 
 | バリデーション内容 | 実施箇所 |
@@ -812,6 +916,8 @@ class TableDef(BaseModel):
 | 循環依存の検出 | `build_load_order()`（`builder.py`） |
 | データ型・NULL・PK・FK・UNIQUE制約 | DuckDB（INSERTエラーとして検出） |
 | ロジックバリデーション | `checker.py`（read_only接続で実行） |
+| リレーションのテーブル/カラム参照整合性 | `validate_relation_refs()`（`relation.py`） |
+| リレーションカーディナリティ検証（一意性・参照整合性） | `run_relation_checks()`（`relation.py`、read_only接続で実行） |
 
 ---
 
@@ -1200,6 +1306,58 @@ def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
 ```
 
 `allowed_values`チェックの結果は`checks_results`に含めて返す（`aggregation_checks_results`ではない）。
+
+---
+
+### 8.4.1 `tval/relation.py`
+
+**責務**: テーブル間リレーションのカーディナリティ検証
+
+**公開関数**
+
+```python
+def load_relations(path: str | Path) -> list[RelationDef]:
+    """relations.yamlを読み込み、RelationDefリストを返す。
+    YAML上の 'from' キーを 'from_' にリネームしてPydanticに渡す。"""
+
+def validate_relation_refs(
+    relations: list[RelationDef],
+    table_defs: list[TableDef],
+) -> None:
+    """リレーションで参照されるテーブル・カラムがschema定義に存在することを検証。
+    未定義の場合はValueErrorを送出。"""
+
+def run_relation_checks(
+    conn: duckdb.DuckDBPyConnection,
+    relations: list[RelationDef],
+    all_load_errors: dict[str, list[LoadError]],
+) -> list[CheckResult]:
+    """全リレーションのカーディナリティ検証を実行し、CheckResultリストを返す。
+    ロードエラーがあるテーブルを含むリレーションは全チェックSKIPPED。"""
+```
+
+**内部関数**
+
+```python
+def _build_uniqueness_sql(table: str, cols: list[str]) -> str:
+    """重複キー組み合わせの件数を返すSQL。0ならチェックOK。"""
+
+def _build_referential_sql(
+    source_table: str, source_cols: list[str],
+    target_table: str, target_cols: list[str],
+) -> str:
+    """孤立行の件数を返すSQL。NULLは除外。0ならチェックOK。"""
+
+def _build_relation_checks(rel: RelationDef) -> list[tuple[str, str]]:
+    """カーディナリティに応じた(description, sql)ペアリストを生成。"""
+```
+
+**パイプライン統合**
+
+- `main.py`にて、スキーマ読込後に`load_relations()` + `validate_relation_refs()`を実行
+- read-only接続ブロック内で`run_relation_checks()`を実行
+- エクスポート判定時はテーブル結果とリレーション結果の両方を考慮
+- `generate_report()`に`relation_check_results`を渡す
 
 ---
 
@@ -1619,14 +1777,17 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 | FK参照先テーブルがschema_dir内に未定義 | `ValueError` | メッセージを表示して終了 |
 | 循環依存 | `ValueError`（`CycleError`をラップ） | 関係するテーブル名を表示して終了 |
 | `schema_dir`にYAMLが0件 | `FileNotFoundError` | メッセージを表示して終了 |
+| リレーション定義が未定義テーブル/カラムを参照 | `ValueError` | メッセージを表示して終了 |
 
 ### 実行時エラー（レポートに記録して継続）
 
 | 条件 | 記録先 | 挙動 |
 |---|---|---|
 | INSERTエラー | `LoadError` | 当該ファイルをNGとしてレポートに記録。次のファイルに進む |
-| checksクエリエラー | `CheckResult(status="SKIPPED")` | エラー内容をmessageに記録 |
-| SUMMARIZEエラー | `profiles=[]`として扱う | レポートの統計量セクションを空表示 |
+| checksクエリエラー | `CheckResult(status="ERROR")` | エラー内容をmessageに記録 |
+| プロファイリングエラー | `ColumnProfile(error=...)` | エラー内容をerrorフィールドに記録 |
+| リレーションチェックSQL実行エラー | `CheckResult(status="ERROR")` | エラー内容をmessageに記録 |
+| ロードエラーのあるテーブルを含むリレーション | `CheckResult(status="SKIPPED")` | スキップ理由をmessageに記録 |
 
 ---
 
@@ -1648,6 +1809,10 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
   - 集計バリデーション結果（aggregation_checks）
   - 基本統計量テーブル
   - エクスポート結果（export_resultがNoneでない場合のみ表示）
+
+[リレーションカーディナリティ検証セクション（relations_path設定時のみ表示）]
+  - リレーション検証サマリー（総数 / OK / NG / SKIPPED）
+  - 各リレーションチェック結果（ステータス・説明・クエリ・メッセージ）
 ```
 
 ### ステータス表示
@@ -1656,6 +1821,7 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 |---|---|
 | OK | ✅ |
 | NG | ❌ |
+| ERROR | ❌ |
 | SKIPPED | ⚠️ |
 
 ### Jinja2テンプレート変数
@@ -1671,7 +1837,14 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
         "total": int,
         "ok": int,
         "ng": int,
-    }
+    },
+    "relation_check_results": list[CheckResult],  # リレーション検証結果
+    "relation_summary": {
+        "total": int,
+        "ok": int,
+        "ng": int,
+        "skipped": int,
+    },
 }
 ```
 
@@ -1707,4 +1880,6 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 | checksクエリのSQL任意実行 | 内部ツールとして許容。外部公開する場合は再検討が必要 |
 | テーブル定義書のフォーマット変更 | YAMLスキーマを変更した場合、Pydanticモデルも合わせて修正が必要 |
 | マルチスキーマ非対応 | DuckDBの`main`スキーマのみを対象とする |
-| ER図生成 | 初期スコープ外。FK定義からMermaid.jsで生成可能だが、カーディナリティの完全導出には複合PK・UNIQUE参照・自己参照等のエッジケース対応が必要なため後続開発とする |
+| リレーション検証の複合キー | 複合キーのリレーション検証は全カラムの一致を要求する。部分一致は未対応 |
+| リレーション検証のNULL処理 | NULL値は参照整合性チェックから除外される（SQL FK標準に準拠）。NULLの存在そのものの検証が必要な場合はスキーマYAMLの`not_null`制約を使用すること |
+| ER図生成 | 初期スコープ外。FK定義とrelations.yamlからMermaid.jsで生成可能だが、後続開発とする |

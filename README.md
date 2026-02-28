@@ -39,9 +39,10 @@ Open `tval/output/report.html` in your browser to review the results.
   - [3.4 Define Table Schemas](#34-define-table-schemas)
   - [3.5 Configure config.yaml](#35-configure-configyaml)
   - [3.6 Run Validation](#36-run-validation)
-  - [3.7 Understanding the HTML Report](#37-understanding-the-html-report)
-  - [3.8 Parquet Export](#38-parquet-export)
-  - [3.9 Docker Usage](#39-docker-usage)
+  - [3.7 Define Relations (Optional)](#37-define-relations-optional)
+  - [3.8 Understanding the HTML Report](#38-understanding-the-html-report)
+  - [3.9 Parquet Export](#39-parquet-export)
+  - [3.10 Docker Usage](#310-docker-usage)
 - [4. Developer Guide](#4-developer-guide)
   - [4.1 Development Setup](#41-development-setup)
   - [4.2 Code Quality](#42-code-quality)
@@ -86,10 +87,13 @@ config.yaml          schema/*.yaml
      Run checks (allowed values, user-defined, aggregation)
               |
               v
+     Run relation checks (optional, from relations.yaml)
+              |
+              v
      Profile columns (statistics)
               |
               v
-     Export to Parquet (optional, gated)
+     Export to Parquet (optional, gated by table + relation results)
               |
               v
      Generate HTML report
@@ -127,6 +131,7 @@ tval/
 │   ├── builder.py           # DDL generation + topological sort
 │   ├── loader.py            # CSV/XLSX/Parquet → DuckDB INSERT
 │   ├── checker.py           # Validation check execution
+│   ├── relation.py          # Inter-table relation cardinality validation
 │   ├── profiler.py          # Column statistics computation
 │   ├── exporter.py          # Parquet export with partitioning
 │   ├── reporter.py          # HTML report generation
@@ -137,9 +142,15 @@ tval/
 │   ├── test_parser.py       # Schema parsing and validation
 │   ├── test_builder.py      # DDL generation and dependency ordering
 │   ├── test_loader.py       # Data loading into DuckDB
+│   ├── test_checker.py      # Validation check execution
+│   ├── test_profiler.py     # Column profiling
+│   ├── test_exporter.py     # Parquet export
+│   ├── test_reporter.py     # HTML report generation
+│   ├── test_relation.py     # Relation cardinality validation
 │   └── test_integration.py  # End-to-end pipeline tests
 ├── docs/
 │   ├── DESIGN.md            # Architecture and design decisions
+│   ├── Background.md        # Motivation and design rationale
 │   └── CLAUDE.md            # AI assistant context
 ├── pyproject.toml           # Build config, dependencies, tool settings
 ├── Dockerfile               # Development container
@@ -174,6 +185,7 @@ tval/
 | `builder.py` | Generate CREATE TABLE SQL, resolve FK dependency order (topo sort)  |
 | `loader.py`  | Load CSV/XLSX/Parquet files into DuckDB with encoding detection     |
 | `checker.py` | Execute allowed-value, user-defined, and aggregation checks         |
+| `relation.py`| Validate inter-table relationship cardinalities (1:1, 1:N, N:1, N:N) |
 | `profiler.py`| Compute column statistics (count, nulls, unique, mean, percentiles) |
 | `exporter.py`| Export tables to Parquet with optional Hive partitioning            |
 | `reporter.py`| Render HTML report from Jinja2 template                             |
@@ -365,6 +377,7 @@ database_path: ./tval/work.duckdb           # DuckDB file path (must end in .duc
 schema_dir: ./tval/schema                    # Directory containing schema YAML files
 output_path: ./tval/output/report.html       # HTML report output path
 encoding_confidence_threshold: 0.8           # Minimum confidence for CSV encoding detection (0.0-1.0)
+# relations_path: ./tval/relations.yaml      # Optional: inter-table relation definitions
 ```
 
 | Field                          | Type    | Default | Description                                             |
@@ -373,6 +386,7 @@ encoding_confidence_threshold: 0.8           # Minimum confidence for CSV encodi
 | `schema_dir`                   | `string`| -       | Directory containing table schema YAML files            |
 | `output_path`                  | `string`| -       | Output path for the generated HTML report               |
 | `encoding_confidence_threshold`| `float` | `0.8`   | Minimum confidence from `chardet` to trust detected CSV encoding |
+| `relations_path`               | `string`| -       | Optional path to `relations.yaml` for cardinality validation |
 
 ### 3.6 Run Validation
 
@@ -395,18 +409,72 @@ tval run --export
 | `tval run` | `--config`  | Auto-discover      | Path to `config.yaml`                        |
 | `tval run` | `--export`  | Disabled           | Export to Parquet if all validations pass     |
 
-### 3.7 Understanding the HTML Report
+### 3.7 Define Relations (Optional)
 
-The generated HTML report contains the following sections for each table:
+To validate inter-table relationship cardinalities, create a `relations.yaml` file and reference it in `config.yaml`:
 
-| Section              | Description                                                         |
-|----------------------|---------------------------------------------------------------------|
-| **Summary**          | Total tables, OK count, NG count                                    |
-| **Load Results**     | Per-file load status; errors are displayed with messages             |
-| **Logic Validation** | Results of allowed-value checks and user-defined `checks`           |
-| **Aggregation**      | Results of `aggregation_checks` (reported separately)               |
-| **Statistics**       | Column profiles: count, nulls, unique, mean, std, min, max, percentiles |
-| **Export**           | Parquet export status (only when `--export` is used)                |
+```yaml
+# config.yaml
+relations_path: ./tval/relations.yaml
+```
+
+```yaml
+# relations.yaml
+relations:
+  - name: users-orders
+    cardinality: "1:N"
+    from:
+      table: users
+      columns: [user_id]
+    to:
+      table: orders
+      columns: [user_id]
+
+  - name: orders-order_details
+    cardinality: "1:N"
+    from:
+      table: orders
+      columns: [order_id]
+    to:
+      table: order_details
+      columns: [order_id]
+```
+
+#### Supported Cardinalities
+
+| Cardinality | Checks Performed | Count |
+|-------------|------------------|-------|
+| `1:1` | from uniqueness + to uniqueness + bidirectional referential integrity | 4 |
+| `1:N` | from (1-side) uniqueness + to→from referential integrity | 2 |
+| `N:1` | to (1-side) uniqueness + from→to referential integrity | 2 |
+| `N:N` | bidirectional referential integrity | 2 |
+
+#### Relation Definition Reference
+
+| Field         | Type       | Required | Description                                           |
+|---------------|------------|----------|-------------------------------------------------------|
+| `name`        | `string`   | Yes      | Human-readable name for the relation                  |
+| `cardinality` | `string`   | Yes      | One of `1:1`, `1:N`, `N:1`, `N:N`                    |
+| `from.table`  | `string`   | Yes      | Table name (must match a schema YAML definition)      |
+| `from.columns`| `string[]` | Yes      | Column(s) on the from-side of the relation            |
+| `to.table`    | `string`   | Yes      | Table name (must match a schema YAML definition)      |
+| `to.columns`  | `string[]` | Yes      | Column(s) on the to-side of the relation              |
+
+Relation checks follow the same skip logic as table checks: if either table has load errors, all checks for that relation are marked `SKIPPED`. NULL values are excluded from referential integrity checks (consistent with SQL FK semantics).
+
+### 3.8 Understanding the HTML Report
+
+The generated HTML report contains the following sections:
+
+| Section                            | Description                                                         |
+|------------------------------------|---------------------------------------------------------------------|
+| **Summary**                        | Total tables, OK count, NG count                                    |
+| **Load Results** (per table)       | Per-file load status; errors are displayed with messages             |
+| **Logic Validation** (per table)   | Results of allowed-value checks and user-defined `checks`           |
+| **Aggregation** (per table)        | Results of `aggregation_checks` (reported separately)               |
+| **Statistics** (per table)         | Column profiles: count, nulls, unique, mean, std, min, max, percentiles |
+| **Export** (per table)             | Parquet export status (only when `--export` is used)                |
+| **Relation Cardinality Validation**| Cross-table relation check results (only when `relations_path` is configured) |
 
 #### Status Definitions
 
@@ -414,14 +482,15 @@ The generated HTML report contains the following sections for each table:
 |-------------|------------------------------------------------------------------- |
 | **OK**      | Check passed (or table has no validation failures)                 |
 | **NG**      | Check failed (e.g. unexpected values found, constraint violated)   |
-| **SKIPPED** | Check was skipped due to upstream load errors or execution failure  |
+| **ERROR**   | Check execution failed (e.g. SQL error)                            |
+| **SKIPPED** | Check was skipped due to upstream load errors                      |
 
-### 3.8 Parquet Export
+### 3.9 Parquet Export
 
 Parquet export is triggered by the `--export` flag and follows an **all-or-nothing** rule:
 
-- If **all tables** have `OK` status, every table is exported to Parquet.
-- If **any table** has `NG` status, all exports are marked `SKIPPED`.
+- If **all tables** have `OK` status **and** all relation checks pass (or are skipped), every table is exported to Parquet.
+- If **any table** has `NG` status or any relation check fails, all exports are marked `SKIPPED`.
 
 Export output is written to `<output_path_parent>/parquet/<table_name>/`.
 
@@ -439,7 +508,7 @@ parquet/orders/region=US/year=2024/data_0.parquet
 parquet/orders/region=JP/year=2024/data_0.parquet
 ```
 
-### 3.9 Docker Usage
+### 3.10 Docker Usage
 
 A development container is provided via the `Dockerfile`:
 
@@ -488,6 +557,11 @@ Tests use **real DuckDB instances and real data files** (no mocking):
 | `test_parser.py`       | YAML schema parsing and Pydantic validation          |
 | `test_builder.py`      | DDL generation and FK dependency ordering            |
 | `test_loader.py`       | CSV/XLSX/Parquet file loading into DuckDB            |
+| `test_checker.py`      | Validation check execution and error handling        |
+| `test_profiler.py`     | Column statistics computation and error handling     |
+| `test_exporter.py`     | Parquet export with partitioning                     |
+| `test_reporter.py`     | HTML report generation and status aggregation        |
+| `test_relation.py`     | Relation cardinality validation (1:1, 1:N, N:1, N:N)|
 | `test_integration.py`  | End-to-end pipeline validation                       |
 
 ### 4.4 CI Pipeline
@@ -509,15 +583,16 @@ Matrix: **Python 3.10** and **Python 3.12** on `ubuntu-latest`.
                    cli.py
                   /      \
             init.py      main.py
-                         /  |  \  \  \  \  \
-                parser.py   |   |  |  |  |  reporter.py
-                   builder.py   |  |  |  |
-                      loader.py |  |  |
-                        checker.py |  |
-                          profiler.py |
-                            exporter.py
-                                |
-                 All modules --> logger.py
+                         /  |  \  \  \  \  \  \
+                parser.py   |   |  |  |  |  |  reporter.py
+                   builder.py   |  |  |  |  |
+                      loader.py |  |  |  |
+                        checker.py |  |  |
+                          relation.py |  |
+                            profiler.py |
+                              exporter.py
+                                  |
+                   All modules --> logger.py
 ```
 
 Key design decisions:
