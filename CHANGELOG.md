@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CSV encoding detection now samples only first 8KB instead of reading the full file
 - UTF-8/ASCII CSV files are passed directly to DuckDB without creating a temp copy
 - Non-UTF-8 CSV conversion uses streaming I/O (`shutil.copyfileobj`) to reduce peak memory
+- Replaced string literals with `CheckStatus` / `ExportStatus` enums (`status.py`) — eliminates typo risk and enables IDE autocompletion across checker, exporter, relation, and reporter modules
+- Split monolithic `run()` in `main.py` into `_discover_config_path()`, `_load_data()`, `_build_table_reports()` — reduces function complexity for readability and testability
+- Split `_insert_file()` in `loader.py` into `_insert_csv()`, `_insert_xlsx()`, `_insert_parquet()` — isolates format-specific logic while keeping centralized error handling
+- Added `ProjectConfig` Pydantic model in `parser.py` — validates `config.yaml` with type safety instead of raw dict access
+- Enabled ruff rules B (flake8-bugbear) and C90 (mccabe, max-complexity=15) — catches common bugs (`zip()` without `strict`, duplicate set items) and enforces complexity limits
+- Simplified README.md for data analysts — replaced DDL jargon (PRIMARY KEY, FOREIGN KEY) with plain-language explanations, added cardinality examples, expanded SKIPPED/ERROR guidance
+- Reduced DESIGN.md from 1967 to 718 lines — removed inline code snippets, kept only spec tables, YAML examples, and architecture diagrams
 
 ### Fixed
 
