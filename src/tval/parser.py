@@ -141,6 +141,12 @@ class TableDef(BaseModel):
             raise ValueError("At least one column is required")
 
         col_names = {c.name for c in obj.columns}
+        if len(col_names) != len(obj.columns):
+            seen: set[str] = set()
+            for c in obj.columns:
+                if c.name in seen:
+                    raise ValueError(f"Duplicate column name: {c.name}")
+                seen.add(c.name)
 
         # Validate source_dir existence
         source_dir = Path(obj.table.source_dir)

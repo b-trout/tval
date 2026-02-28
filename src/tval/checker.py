@@ -25,7 +25,7 @@ class CheckResult:
 
     description: str
     query: str
-    status: str  # "OK" | "NG" | "SKIPPED"
+    status: str  # "OK" | "NG" | "SKIPPED" | "ERROR"
     result_count: int | None
     message: str
 
@@ -76,17 +76,18 @@ def _execute_check(
             message=message,
         )
     except Exception as e:
-        logger.warning(
-            "Check skipped",
+        logger.error(
+            "Check execution error",
             extra={
                 "table": table_name,
                 "check_description": check.description,
+                "error": str(e),
             },
         )
         return CheckResult(
             description=check.description,
             query=query,
-            status="SKIPPED",
+            status="ERROR",
             result_count=None,
             message=str(e),
         )

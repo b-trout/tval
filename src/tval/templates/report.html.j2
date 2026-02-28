@@ -99,6 +99,7 @@
           <td>
             {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
             {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% elif cr.status == "ERROR" %}<span class="status-ng">&#x26D4; ERROR</span>
             {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
           </td>
           <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
@@ -123,6 +124,7 @@
           <td>
             {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
             {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% elif cr.status == "ERROR" %}<span class="status-ng">&#x26D4; ERROR</span>
             {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
           </td>
           <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
