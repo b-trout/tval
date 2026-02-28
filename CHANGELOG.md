@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Duplicate column name validation in schema parser
 - Unit tests for checker, profiler, exporter, reporter, and relation modules
 
+### Changed
+
+- CSV encoding detection now samples only first 8KB instead of reading the full file
+- UTF-8/ASCII CSV files are passed directly to DuckDB without creating a temp copy
+- Non-UTF-8 CSV conversion uses streaming I/O (`shutil.copyfileobj`) to reduce peak memory
+
 ### Fixed
 
 - Checker now reports `ERROR` status instead of silent `SKIPPED` on SQL execution failures

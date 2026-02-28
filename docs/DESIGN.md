@@ -552,7 +552,7 @@ logger.error("ファイルロード失敗", extra={"file": file_path, "table": t
 | `main.py` | INFO | ツール起動時・終了時 | - |
 | `builder.py` | INFO | テーブル作成時 | `table` |
 | `loader.py` | INFO | ファイルロード開始・完了時 | `table`, `file` |
-| `loader.py` | WARNING | CSV文字コードをUTF-8に変換した場合 | `file`, `detected_encoding`, `confidence` |
+| `loader.py` | INFO | CSV文字コードをUTF-8に変換した場合（非UTF-8のみ） | `file`, `detected_encoding`, `confidence` |
 | `loader.py` | ERROR | CSV文字コード検出の信頼度が閾値未満の場合 | `file`, `detected_encoding`, `confidence`, `threshold` |
 | `loader.py` | ERROR | ファイルロードエラー時 | `table`, `file`, `error_type` |
 | `loader.py` | WARNING | 非対応拡張子スキップ時 | `file` |
@@ -1033,10 +1033,10 @@ def load_files(
 
 ```python
 # CSV（文字コード検出・変換あり。詳細は後述）
-# 常にUTF-8一時ファイルを作成し、明示的なカラム型指定でread_csvに渡す
+# UTF-8/ASCIIの場合は元ファイルをそのまま渡し、非UTF-8の場合はUTF-8一時ファイルを作成する
 conn.execute(
     f"INSERT INTO {quote_identifier(table_name)} SELECT * FROM read_csv(?, header=true, columns={columns_override})",
-    [resolved_path]   # resolved_pathはUTF-8一時ファイルのパス
+    [resolved_path]   # UTF-8/ASCII: 元ファイルパス、非UTF-8: 一時ファイルパス
 )
 
 # Parquet
@@ -1117,10 +1117,11 @@ FROM read_csv(
 
 **CSVの文字コード検出・変換**
 
-CSVファイルのロード前に以下の処理を行う。`chardet`で文字コードを検出し、常にUTF-8に変換した一時ファイルを作成してから`read_csv`に渡す。一時ファイルは`_insert_file()`の終了時（成功・失敗問わず）に削除する。
+CSVファイルのロード前に以下の処理を行う。`chardet`で文字コードを検出し（先頭8KBのみサンプリング）、UTF-8/ASCIIの場合は元ファイルをそのまま`read_csv`に渡す。非UTF-8の場合はストリーミングでUTF-8一時ファイルに変換してから渡す。一時ファイルは`_insert_file()`の終了時（成功・失敗問わず）に削除する。
 
 ```python
 import chardet
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -1133,20 +1134,23 @@ def _resolve_csv_path(
     confidence_threshold: float,
 ) -> tuple[str, bool]:
     """
-    CSVファイルの文字コードを検出し、常にUTF-8の一時ファイルを作成する。
+    CSVファイルの文字コードを検出する。UTF-8/ASCIIの場合は元ファイルパスを
+    そのまま返し、非UTF-8の場合はストリーミングでUTF-8一時ファイルに変換する。
 
     信頼度がconfidence_threshold未満の場合はEncodingDetectionErrorを送出する。
 
     Returns:
-        (一時ファイルのパス, True)
+        UTF-8/ASCII: (元ファイルパス, False)
+        非UTF-8: (一時ファイルのパス, True)
 
     Raises:
         EncodingDetectionError: 信頼度が閾値未満の場合
     """
+    _CHARDET_SAMPLE_SIZE = 8192
     with open(file_path, "rb") as f:
-        raw = f.read()
+        sample = f.read(_CHARDET_SAMPLE_SIZE)
 
-    detected = chardet.detect(raw)
+    detected = chardet.detect(sample)
     encoding = detected.get("encoding") or "utf-8"
     confidence = detected.get("confidence") or 0.0
 
@@ -1158,16 +1162,19 @@ def _resolve_csv_path(
             f"threshold={confidence_threshold})"
         )
 
-    # 常にUTF-8一時ファイルに変換して書き出す
-    text = raw.decode(encoding, errors="replace")
+    # UTF-8/ASCIIはそのまま返す（I/O・メモリ削減）
+    if encoding.lower().replace("-", "") in ("utf8", "ascii"):
+        return file_path, False
+
+    # 非UTF-8: ストリーミングでUTF-8一時ファイルに変換
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         suffix=".csv",
         delete=False,
     )
-    tmp.write(text)
-    tmp.close()
+    with open(file_path, "r", encoding=encoding, errors="replace") as src, tmp:
+        shutil.copyfileobj(src, tmp)
     return tmp.name, True
 ```
 
@@ -1210,11 +1217,11 @@ for file_path in csv_files:
 
 **ログ出力（文字コード変換時）**
 
-文字コード変換が発生した場合はWARNINGレベルでログを出力すること。
+非UTF-8の文字コード変換が発生した場合はINFOレベルでログを出力すること。UTF-8/ASCIIの場合はログ出力しない。
 
 ```python
-logger.warning(
-    "CSV文字コードをUTF-8に変換しました",
+logger.info(
+    "Converting CSV to temporary UTF-8 file",
     extra={
         "file": file_path,
         "detected_encoding": encoding,
