@@ -1883,3 +1883,24 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 | リレーション検証の複合キー | 複合キーのリレーション検証は全カラムの一致を要求する。部分一致は未対応 |
 | リレーション検証のNULL処理 | NULL値は参照整合性チェックから除外される（SQL FK標準に準拠）。NULLの存在そのものの検証が必要な場合はスキーマYAMLの`not_null`制約を使用すること |
 | ER図生成 | 初期スコープ外。FK定義とrelations.yamlからMermaid.jsで生成可能だが、後続開発とする |
+
+---
+
+## 14. エラーハンドリング規約
+
+本プロジェクトでは、エラーの発生箇所に応じて2つのハンドリング方針を使い分ける。
+
+### 入力バリデーション（即時例外）
+
+対象モジュール: `parser.py`（スキーマYAML）、`main.py`（`ProjectConfig`による設定ファイル検証）
+
+- `ValueError`、`FileNotFoundError` 等の例外を送出し、パイプラインを即時停止する
+- 理由: 設定やスキーマの誤りはプログラマ（利用者）のミスであり、早期に検出して修正を促すべきである（フェイルファスト原則）
+
+### ランタイム操作（Result オブジェクト返却）
+
+対象モジュール: `loader.py`（`LoadError`）、`checker.py`（`CheckResult`）、`exporter.py`（`ExportResult`）、`profiler.py`（`ColumnProfile.error`）
+
+- 例外を送出せず、構造化されたResultオブジェクトにエラー情報を格納して返却する
+- パイプラインは停止せず、全テーブル・全チェックを処理した後にHTMLレポートでまとめて報告する
+- 理由: データ品質の問題は入力データに起因するものであり、可能な限り多くの問題を一度に検出・報告することが利用者の効率につながる
