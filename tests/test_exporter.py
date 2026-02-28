@@ -8,6 +8,7 @@ import duckdb
 
 from tval.exporter import _escape_string_literal, export_table
 from tval.parser import TableDef
+from tval.status import ExportStatus
 
 
 def _make_tdef(
@@ -63,7 +64,7 @@ class TestExporter:
         tdef = _make_tdef(tmp_path)
         output_dir = tmp_path / "out"
         result = export_table(conn, tdef, output_dir)
-        assert result.status == "OK"
+        assert result.status == ExportStatus.OK
         assert Path(result.output_path).exists()
 
     def test_export_with_partition(self, tmp_path: Path) -> None:
@@ -74,7 +75,7 @@ class TestExporter:
         tdef = _make_tdef(tmp_path, partition_by=["cat"])
         output_dir = tmp_path / "out"
         result = export_table(conn, tdef, output_dir)
-        assert result.status == "OK"
+        assert result.status == ExportStatus.OK
         assert Path(result.output_path).exists()
 
     def test_export_creates_directory(self, tmp_path: Path) -> None:
@@ -86,7 +87,7 @@ class TestExporter:
         output_dir = tmp_path / "nested" / "deep" / "out"
         assert not output_dir.exists()
         result = export_table(conn, tdef, output_dir)
-        assert result.status == "OK"
+        assert result.status == ExportStatus.OK
         assert output_dir.exists()
 
     def test_export_error_returns_error_result(self, tmp_path: Path) -> None:
@@ -96,7 +97,7 @@ class TestExporter:
         tdef = _make_tdef(tmp_path)
         output_dir = tmp_path / "out"
         result = export_table(conn, tdef, output_dir)
-        assert result.status == "ERROR"
+        assert result.status == ExportStatus.ERROR
         assert result.message != ""
 
     def test_escape_string_literal(self) -> None:

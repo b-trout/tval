@@ -16,6 +16,24 @@ from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 DATETIME_TYPES = {"DATE", "TIMESTAMP", "TIME"}
 
 
+class ProjectConfig(BaseModel):
+    """Project configuration loaded from config.yaml."""
+
+    database_path: str
+    schema_dir: str
+    output_path: str
+    encoding_confidence_threshold: float = 0.8
+    relations_path: str | None = None
+
+    @field_validator("database_path")
+    @classmethod
+    def validate_db_extension(cls, v: str) -> str:
+        """Ensure database_path has a .duckdb extension."""
+        if not v.endswith(".duckdb"):
+            raise ValueError(f"database_path must have .duckdb extension: {v}")
+        return v
+
+
 class ColumnDef(BaseModel):
     """Definition of a single table column with type and constraint metadata."""
 
@@ -123,6 +141,43 @@ class TableMeta(BaseModel):
     source_dir: str
 
 
+def _validate_source_dir(source_dir_str: str, project_root: str | None) -> None:
+    """Validate that source_dir exists and is within project root."""
+    source_dir = Path(source_dir_str)
+    if not source_dir.exists():
+        raise ValueError(f"source_dir does not exist: {source_dir_str}")
+    if project_root is not None:
+        resolved = source_dir.resolve()
+        root_resolved = Path(project_root).resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            raise ValueError(
+                f"source_dir must be under the project root: {source_dir_str}"
+            ) from None
+
+
+def _validate_constraint_columns(
+    col_names: set[str], constraints: "TableConstraints", export: ExportDef
+) -> None:
+    """Validate that all constraint-referenced columns exist in the table."""
+    for pk in constraints.primary_key:
+        for col in pk.columns:
+            if col not in col_names:
+                raise ValueError(f"Column not found in primary_key: {col}")
+    for uq in constraints.unique:
+        for col in uq.columns:
+            if col not in col_names:
+                raise ValueError(f"Column not found in unique: {col}")
+    for fk in constraints.foreign_keys:
+        for col in fk.columns:
+            if col not in col_names:
+                raise ValueError(f"Column not found in foreign_keys: {col}")
+    for col in export.partition_by:
+        if col not in col_names:
+            raise ValueError(f"Column not found in export.partition_by: {col}")
+
+
 class TableDef(BaseModel):
     """Complete table definition including columns, constraints, and export config."""
 
@@ -148,46 +203,10 @@ class TableDef(BaseModel):
                     raise ValueError(f"Duplicate column name: {c.name}")
                 seen.add(c.name)
 
-        # Validate source_dir existence
-        source_dir = Path(obj.table.source_dir)
-        if not source_dir.exists():
-            raise ValueError(f"source_dir does not exist: {obj.table.source_dir}")
-
-        # Validate source_dir is within project root
         context = info.context or {}
-        project_root = context.get("project_root")
-        if project_root is not None:
-            resolved = source_dir.resolve()
-            root_resolved = Path(project_root).resolve()
-            try:
-                resolved.relative_to(root_resolved)
-            except ValueError:
-                raise ValueError(
-                    f"source_dir must be under the project root: {obj.table.source_dir}"
-                )
-
-        # Validate PK columns exist
-        for pk in obj.table_constraints.primary_key:
-            for col in pk.columns:
-                if col not in col_names:
-                    raise ValueError(f"Column not found in primary_key: {col}")
-
-        # Validate UNIQUE columns exist
-        for uq in obj.table_constraints.unique:
-            for col in uq.columns:
-                if col not in col_names:
-                    raise ValueError(f"Column not found in unique: {col}")
-
-        # Validate FK source columns exist
-        for fk in obj.table_constraints.foreign_keys:
-            for col in fk.columns:
-                if col not in col_names:
-                    raise ValueError(f"Column not found in foreign_keys: {col}")
-
-        # Validate export.partition_by columns exist
-        for col in obj.export.partition_by:
-            if col not in col_names:
-                raise ValueError(f"Column not found in export.partition_by: {col}")
+        project_root: str | None = context.get("project_root")
+        _validate_source_dir(obj.table.source_dir, project_root)
+        _validate_constraint_columns(col_names, obj.table_constraints, obj.export)
 
         return obj
 

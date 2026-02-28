@@ -143,11 +143,14 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
+select = ["E", "F", "I", "B", "C90"]   # pycodestyle, pyflakes, isort, bugbear, mccabe
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.mypy]
 python_version = "3.10"

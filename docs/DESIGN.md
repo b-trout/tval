@@ -109,6 +109,7 @@ tval/                        # リポジトリルート
 │       ├── exporter.py      # Parquetエクスポート
 │       ├── reporter.py      # HTMLレポート生成
 │       ├── logger.py        # 構造化JSONロガー
+│       ├── status.py        # ステータスEnum定義（CheckStatus / ExportStatus）
 │       └── templates/
 │           └── report.html.j2
 └── tests/
@@ -185,14 +186,7 @@ class JsonFormatter(logging.Formatter):
         }
         # extra引数で渡された任意フィールドを展開
         for key, value in record.__dict__.items():
-            if key not in {
-                "timestamp", "level", "module", "message",
-                "name", "msg", "args", "created", "filename",
-                "funcName", "levelname", "levelno", "lineno",
-                "module", "msecs", "pathname", "process",
-                "processName", "relativeCreated", "stack_info",
-                "thread", "threadName", "exc_info", "exc_text",
-            }:
+            if key not in _RESERVED:
                 log[key] = value
         if record.exc_info:
             log["exception"] = self.formatException(record.exc_info)
@@ -208,6 +202,8 @@ def get_logger(name: str) -> logging.Logger:
         logger.propagate = False
     return logger
 ```
+
+予約フィールドは `_RESERVED` セットとしてモジュールレベルに定義する。重複エントリを避けるためセットリテラルを使用する。
 
 ### 使用方法
 
@@ -282,14 +278,17 @@ dev = [
 tval = "tval.cli:main"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
+select = ["E", "F", "I", "B", "C90"]   # pycodestyle, pyflakes, isort, bugbear, mccabe
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 strict = true
 ```
 
@@ -308,9 +307,12 @@ tval/                        # リポジトリルート
 │       ├── builder.py
 │       ├── loader.py
 │       ├── checker.py
+│       ├── relation.py
 │       ├── profiler.py
+│       ├── exporter.py
 │       ├── reporter.py
 │       ├── logger.py
+│       ├── status.py
 │       └── templates/
 │           └── report.html.j2
 └── tests/                   # テストコード（任意）
@@ -506,14 +508,7 @@ class JsonFormatter(logging.Formatter):
         }
         # extra引数で渡された任意フィールドを展開
         for key, value in record.__dict__.items():
-            if key not in {
-                "timestamp", "level", "module", "message",
-                "name", "msg", "args", "created", "filename",
-                "funcName", "levelname", "levelno", "lineno",
-                "module", "msecs", "pathname", "process",
-                "processName", "relativeCreated", "stack_info",
-                "thread", "threadName", "exc_info", "exc_text",
-            }:
+            if key not in _RESERVED:
                 log[key] = value
         if record.exc_info:
             log["exception"] = self.formatException(record.exc_info)
@@ -816,7 +811,28 @@ WHERE s.col IS NOT NULL AND t.col IS NULL
 
 ## 7. データモデル仕様
 
-`validator/parser.py`に実装する。全モデルはPydantic `BaseModel`を継承する。
+`tval/parser.py`に実装する。全モデルはPydantic `BaseModel`を継承する。
+
+### 設定ファイルモデル
+
+```python
+class ProjectConfig(BaseModel):
+    """config.yaml のバリデーション済みモデル"""
+    database_path: str
+    schema_dir: str
+    output_path: str
+    encoding_confidence_threshold: float = 0.8
+    relations_path: str | None = None
+
+    @field_validator("database_path")
+    @classmethod
+    def validate_db_extension(cls, v: str) -> str:
+        if not v.endswith(".duckdb"):
+            raise ValueError(f"database_path must have .duckdb extension: {v}")
+        return v
+```
+
+### スキーマ定義モデル
 
 ```python
 class ColumnDef(BaseModel):
@@ -911,7 +927,7 @@ class RelationsConfig(BaseModel):
 | `source_dir`の存在確認 | Pydantic `field_validator`（`parser.py`） |
 | `export.partition_by`に指定されたカラムが`columns`に存在するか | Pydantic `model_validator`（`parser.py`） |
 | `format`がDATE/TIMESTAMP/TIME以外の型に指定されていないか | Pydantic `model_validator`（`parser.py`） |
-| `database_path`の拡張子確認（`.duckdb`必須） | `main.py`起動時 |
+| `database_path`の拡張子確認（`.duckdb`必須） | `ProjectConfig.validate_db_extension()`（`parser.py`） |
 | FK参照先テーブルの存在確認 | `build_load_order()`（`builder.py`） |
 | 循環依存の検出 | `build_load_order()`（`builder.py`） |
 | データ型・NULL・PK・FK・UNIQUE制約 | DuckDB（INSERTエラーとして検出） |
@@ -1254,18 +1270,24 @@ logger.info(
 **データクラス**
 
 ```python
+from .status import CheckStatus
+
 @dataclass
 class CheckResult:
     description: str
-    query: str          # 実際に実行したSQL（{table}置換済み）
-    status: str         # "OK" | "NG" | "SKIPPED"
-    result_count: int | None  # クエリが返した件数
-    message: str        # エラー詳細またはスキップ理由
+    query: str                   # 実際に実行したSQL（{table}置換済み）
+    status: CheckStatus          # CheckStatus.OK | NG | SKIPPED | ERROR
+    result_count: int | None     # クエリが返した件数
+    message: str                 # エラー詳細またはスキップ理由
 ```
 
 **公開関数**
 
 ```python
+def make_skipped_result(check: CheckDef, table_name: str, message: str) -> CheckResult:
+    """チェック実行不能時のSKIPPED CheckResultを生成するヘルパー。
+    relation.pyからも使用される。"""
+
 def run_checks(
     conn: duckdb.DuckDBPyConnection,
     tdef: TableDef,
@@ -1283,7 +1305,7 @@ def run_checks(
 
     {table}プレースホルダをtdef.table.nameに置換してSQLを実行する。
     expect_zero=trueの場合: 結果が0件 → OK、1件以上 → NG
-    SQLエラー発生時: status="SKIPPED", messageにエラー内容を記録
+    SQLエラー発生時: status=CheckStatus.ERROR, messageにエラー内容を記録
 
     Returns: (checks_results, aggregation_checks_results)
     """
@@ -1510,12 +1532,14 @@ def export_table(
 **データクラス**
 
 ```python
+from .status import ExportStatus
+
 @dataclass
 class ExportResult:
     table_name: str
-    status: str           # "OK" | "SKIPPED" | "ERROR"
-    output_path: str      # 実際に書き出したパス
-    message: str = ""     # エラー内容またはスキップ理由
+    status: ExportStatus    # ExportStatus.OK | SKIPPED | ERROR
+    output_path: str        # 実際に書き出したパス
+    message: str = ""       # エラー内容またはスキップ理由
 ```
 
 **エクスポートのSQL実装**
@@ -1556,12 +1580,12 @@ class TableReport:
     export_result: ExportResult | None  # --exportフラグなし時はNone
 
     @property
-    def overall_status(self) -> str:
+    def overall_status(self) -> CheckStatus:
         """
         NG判定ルール:
-          - load_errorsが1件以上 → "NG"
-          - check_results/agg_check_resultsにNGが1件以上 → "NG"
-          - 全てOKまたはSKIPPED → "OK"
+          - load_errorsが1件以上 → CheckStatus.NG
+          - check_results/agg_check_resultsにNG/ERRORが1件以上 → CheckStatus.NG
+          - 全てOKまたはSKIPPED → CheckStatus.OK
         """
 ```
 
@@ -1581,68 +1605,61 @@ def generate_report(
 
 ### 8.8 `main.py`
 
+`run()`関数はヘルパー関数に分割し、オーケストレーションに専念させる。
+
 ```python
 import yaml
 import duckdb
 from pathlib import Path
 from datetime import datetime
 
-from .parser import load_table_definitions
+from .parser import ProjectConfig, load_table_definitions
 from .builder import build_load_order, create_tables
 from .loader import load_files
 from .checker import run_checks
 from .profiler import profile_table
 from .reporter import TableReport, generate_report
+from .relation import load_relations, run_relation_checks, validate_relation_refs
+from .status import CheckStatus, ExportStatus
 
-def run(config_path: str | None, export: bool = False) -> None:
-    # 1. config探索
-    if config_path is None:
-        for candidate in ["./tval/config.yaml", "./config.yaml"]:
-            if Path(candidate).exists():
-                config_path = candidate
-                break
-        else:
-            raise FileNotFoundError(
-                "config.yaml が見つかりません。"
-                "--config で明示指定するか、./tval/config.yaml を作成してください。"
-            )
 
-    with open(config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+def _discover_config_path(config_path: str | None) -> str:
+    """Auto-discover config.yaml if not specified."""
+    if config_path is not None:
+        return config_path
+    for candidate in ["./tval/config.yaml", "./config.yaml"]:
+        if Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError(
+        "config.yaml not found. Specify with --config or create ./tval/config.yaml."
+    )
 
-    # 2. database_pathの拡張子検証
-    db_path = Path(config["database_path"])
-    if db_path.suffix != ".duckdb":
-        raise ValueError(
-            f"database_path の拡張子は .duckdb である必要があります: {db_path}"
-        )
 
-    # 3. スキーマYAML読み込み（project_rootを渡してパストラバーサル防止）
-    project_root = Path(config_path).resolve().parent
-    table_defs = load_table_definitions(config["schema_dir"], project_root=project_root)
-
-    # 4. DAGによるロード順決定
-    ordered_defs = build_load_order(table_defs)
-
-    # 5. DuckDB接続（既存ファイルは削除して再作成）
-    if db_path.exists():
-        db_path.unlink()
-    conn_rw = duckdb.connect(str(db_path))
-
-    # 6. テーブル作成・ファイルロード
-    create_tables(conn_rw, ordered_defs)
-    confidence_threshold = config.get("encoding_confidence_threshold", 0.8)
-
-    table_reports = []
+def _load_data(
+    conn: duckdb.DuckDBPyConnection,
+    ordered_defs: list[TableDef],
+    confidence_threshold: float,
+) -> dict[str, list[LoadError]]:
+    """Create tables and load all files, returning errors by table name."""
+    create_tables(conn, ordered_defs)
+    all_load_errors: dict[str, list[LoadError]] = {}
     for tdef in ordered_defs:
-        load_errors = load_files(conn_rw, tdef, confidence_threshold=confidence_threshold)
+        load_errors = load_files(conn, tdef, confidence_threshold=confidence_threshold)
+        all_load_errors[tdef.table.name] = load_errors
+    return all_load_errors
 
-        # 7. checks/profilerはread_only接続で実行
-        conn_ro = duckdb.connect(str(db_path), read_only=True)
-        check_results, agg_check_results = run_checks(conn_ro, tdef, load_errors)
-        profiles = profile_table(conn_ro, tdef, load_errors)
-        conn_ro.close()
 
+def _build_table_reports(
+    conn: duckdb.DuckDBPyConnection,
+    ordered_defs: list[TableDef],
+    all_load_errors: dict[str, list[LoadError]],
+) -> list[TableReport]:
+    """Run checks and profiling for each table, returning reports."""
+    table_reports: list[TableReport] = []
+    for tdef in ordered_defs:
+        load_errors = all_load_errors[tdef.table.name]
+        check_results, agg_check_results = run_checks(conn, tdef, load_errors)
+        profiles = profile_table(conn, tdef, load_errors)
         table_reports.append(TableReport(
             table_def=tdef,
             load_errors=load_errors,
@@ -1651,35 +1668,75 @@ def run(config_path: str | None, export: bool = False) -> None:
             profiles=profiles,
             export_result=None,
         ))
+    return table_reports
 
-    conn_rw.close()
 
-    # 8. エクスポート（--exportフラグがある場合のみ）
-    # 1テーブルでもNGがあれば全テーブルのエクスポートをスキップ
+def run(config_path: str | None = None, export: bool = False) -> None:
+    resolved_path = _discover_config_path(config_path)
+
+    # config.yaml を ProjectConfig で検証（database_pathの拡張子検証含む）
+    with open(resolved_path, encoding="utf-8") as f:
+        raw_config = yaml.safe_load(f)
+    config = ProjectConfig.model_validate(raw_config)
+
+    project_root = Path(resolved_path).resolve().parent
+    db_path = project_root / config.database_path
+    schema_dir = project_root / config.schema_dir
+    output_path_cfg = project_root / config.output_path
+
+    table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
+
+    # リレーション（任意）
+    relations = []
+    if config.relations_path:
+        relations_file = project_root / config.relations_path
+        relations = load_relations(str(relations_file))
+        validate_relation_refs(relations, table_defs)
+
+    ordered_defs = build_load_order(table_defs)
+
+    # DuckDB接続（既存ファイルは削除して再作成）
+    if db_path.exists():
+        db_path.unlink()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(db_path)) as conn_rw:
+        all_load_errors = _load_data(conn_rw, ordered_defs, config.encoding_confidence_threshold)
+
+    # checks/profilerはread_only接続で実行
+    with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+        table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
+        if relations:
+            relation_check_results = run_relation_checks(conn_ro, relations, all_load_errors)
+
+    # エクスポート（--exportフラグがある場合のみ）
     if export:
-        all_ok = all(r.overall_status == "OK" for r in table_reports)
-        output_base_dir = project_root / "tval" / "output" / "parquet"
-        conn_ro = duckdb.connect(str(db_path), read_only=True)
-        for i, (report, tdef) in enumerate(zip(table_reports, ordered_defs)):
-            if not all_ok:
-                report.export_result = ExportResult(
-                    table_name=tdef.table.name,
-                    status="SKIPPED",
-                    output_path="",
-                    message="バリデーションNGのテーブルが存在するためスキップしました",
-                )
-            else:
-                report.export_result = export_table(conn_ro, tdef, output_base_dir)
-        conn_ro.close()
+        tables_ok = all(r.overall_status == CheckStatus.OK for r in table_reports)
+        relations_ok = all(
+            r.status in (CheckStatus.OK, CheckStatus.SKIPPED)
+            for r in relation_check_results
+        )
+        all_ok = tables_ok and relations_ok
+        output_base_dir = output_path_cfg.parent / "parquet"
+        with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+            for report, tdef in zip(table_reports, ordered_defs, strict=True):
+                if not all_ok:
+                    report.export_result = ExportResult(
+                        table_name=tdef.table.name,
+                        status=ExportStatus.SKIPPED,
+                        output_path="",
+                        message="Skipped because tables with validation failures exist",
+                    )
+                else:
+                    report.export_result = export_table(conn_ro, tdef, output_base_dir)
 
-    # 8. レポート生成
-    output_path = config["output_path"]
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    # レポート生成
+    output_path_cfg.parent.mkdir(parents=True, exist_ok=True)
     generate_report(
         table_reports=table_reports,
-        output_path=output_path,
+        output_path=str(output_path_cfg),
         db_path=str(db_path),
         executed_at=datetime.now().isoformat(),
+        relation_check_results=relation_check_results,
     )
 ```
 
@@ -1728,14 +1785,18 @@ conn_ro = duckdb.connect(str(db_path), read_only=True)  # checks実行用（read
 
 ### `database_path`の誤削除防止
 
-`tval run`起動時に`database_path`の拡張子を検証する。`.duckdb`以外の拡張子が指定された場合はエラーを表示して即時終了する。
+`ProjectConfig`の`field_validator`で`database_path`の拡張子を検証する。`.duckdb`以外の拡張子が指定された場合は`ValidationError`で即時終了する。
 
 ```python
-db_path = Path(config["database_path"])
-if db_path.suffix != ".duckdb":
-    raise ValueError(
-        f"database_path の拡張子は .duckdb である必要があります: {db_path}"
-    )
+class ProjectConfig(BaseModel):
+    database_path: str
+    # ...
+    @field_validator("database_path")
+    @classmethod
+    def validate_db_extension(cls, v: str) -> str:
+        if not v.endswith(".duckdb"):
+            raise ValueError(f"database_path must have .duckdb extension: {v}")
+        return v
 ```
 
 ### `source_dir`のパストラバーサル防止
@@ -1760,8 +1821,8 @@ def source_dir_within_project(self) -> "TableMeta":
 `main.py`では`config.yaml`の親ディレクトリを`project_root`として渡す。
 
 ```python
-project_root = Path("config.yaml").resolve().parent
-table_defs = load_table_definitions(config["schema_dir"], project_root=project_root)
+project_root = Path(resolved_path).resolve().parent
+table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
 ```
 
 ---
@@ -1784,10 +1845,10 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 | 条件 | 記録先 | 挙動 |
 |---|---|---|
 | INSERTエラー | `LoadError` | 当該ファイルをNGとしてレポートに記録。次のファイルに進む |
-| checksクエリエラー | `CheckResult(status="ERROR")` | エラー内容をmessageに記録 |
+| checksクエリエラー | `CheckResult(status=CheckStatus.ERROR)` | エラー内容をmessageに記録 |
 | プロファイリングエラー | `ColumnProfile(error=...)` | エラー内容をerrorフィールドに記録 |
-| リレーションチェックSQL実行エラー | `CheckResult(status="ERROR")` | エラー内容をmessageに記録 |
-| ロードエラーのあるテーブルを含むリレーション | `CheckResult(status="SKIPPED")` | スキップ理由をmessageに記録 |
+| リレーションチェックSQL実行エラー | `CheckResult(status=CheckStatus.ERROR)` | エラー内容をmessageに記録 |
+| ロードエラーのあるテーブルを含むリレーション | `CheckResult(status=CheckStatus.SKIPPED)` | スキップ理由をmessageに記録 |
 
 ---
 
@@ -1883,3 +1944,24 @@ table_defs = load_table_definitions(config["schema_dir"], project_root=project_r
 | リレーション検証の複合キー | 複合キーのリレーション検証は全カラムの一致を要求する。部分一致は未対応 |
 | リレーション検証のNULL処理 | NULL値は参照整合性チェックから除外される（SQL FK標準に準拠）。NULLの存在そのものの検証が必要な場合はスキーマYAMLの`not_null`制約を使用すること |
 | ER図生成 | 初期スコープ外。FK定義とrelations.yamlからMermaid.jsで生成可能だが、後続開発とする |
+
+---
+
+## 14. エラーハンドリング規約
+
+本プロジェクトでは、エラーの発生箇所に応じて2つのハンドリング方針を使い分ける。
+
+### 入力バリデーション（即時例外）
+
+対象モジュール: `parser.py`（スキーマYAML）、`main.py`（`ProjectConfig`による設定ファイル検証）
+
+- `ValueError`、`FileNotFoundError` 等の例外を送出し、パイプラインを即時停止する
+- 理由: 設定やスキーマの誤りはプログラマ（利用者）のミスであり、早期に検出して修正を促すべきである（フェイルファスト原則）
+
+### ランタイム操作（Result オブジェクト返却）
+
+対象モジュール: `loader.py`（`LoadError`）、`checker.py`（`CheckResult`）、`exporter.py`（`ExportResult`）、`profiler.py`（`ColumnProfile.error`）
+
+- 例外を送出せず、構造化されたResultオブジェクトにエラー情報を格納して返却する
+- パイプラインは停止せず、全テーブル・全チェックを処理した後にHTMLレポートでまとめて報告する
+- 理由: データ品質の問題は入力データに起因するものであり、可能な限り多くの問題を一度に検出・報告することが利用者の効率につながる

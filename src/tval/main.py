@@ -18,7 +18,7 @@ from .checker import CheckResult, run_checks
 from .exporter import ExportResult, export_table
 from .loader import LoadError, load_files
 from .logger import get_logger
-from .parser import load_table_definitions
+from .parser import ProjectConfig, TableDef, load_table_definitions
 from .profiler import profile_table
 from .relation import (
     RelationDef,
@@ -27,8 +27,59 @@ from .relation import (
     validate_relation_refs,
 )
 from .reporter import TableReport, generate_report
+from .status import CheckStatus, ExportStatus
 
 logger = get_logger(__name__)
+
+
+def _discover_config_path(config_path: str | None) -> str:
+    """Auto-discover config.yaml if not specified."""
+    if config_path is not None:
+        return config_path
+    for candidate in ["./tval/config.yaml", "./config.yaml"]:
+        if Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError(
+        "config.yaml not found. Specify with --config or create ./tval/config.yaml."
+    )
+
+
+def _load_data(
+    conn: duckdb.DuckDBPyConnection,
+    ordered_defs: list[TableDef],
+    confidence_threshold: float,
+) -> dict[str, list[LoadError]]:
+    """Create tables and load all files, returning errors by table name."""
+    create_tables(conn, ordered_defs)
+    all_load_errors: dict[str, list[LoadError]] = {}
+    for tdef in ordered_defs:
+        load_errors = load_files(conn, tdef, confidence_threshold=confidence_threshold)
+        all_load_errors[tdef.table.name] = load_errors
+    return all_load_errors
+
+
+def _build_table_reports(
+    conn: duckdb.DuckDBPyConnection,
+    ordered_defs: list[TableDef],
+    all_load_errors: dict[str, list[LoadError]],
+) -> list[TableReport]:
+    """Run checks and profiling for each table, returning reports."""
+    table_reports: list[TableReport] = []
+    for tdef in ordered_defs:
+        load_errors = all_load_errors[tdef.table.name]
+        check_results, agg_check_results = run_checks(conn, tdef, load_errors)
+        profiles = profile_table(conn, tdef, load_errors)
+        table_reports.append(
+            TableReport(
+                table_def=tdef,
+                load_errors=load_errors,
+                check_results=check_results,
+                agg_check_results=agg_check_results,
+                profiles=profiles,
+                export_result=None,
+            )
+        )
+    return table_reports
 
 
 def run(config_path: str | None = None, export: bool = False) -> None:
@@ -48,108 +99,71 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     """
     logger.info("tval execution started")
 
-    # 1. Discover config
-    if config_path is None:
-        for candidate in ["./tval/config.yaml", "./config.yaml"]:
-            if Path(candidate).exists():
-                config_path = candidate
-                break
-        else:
-            raise FileNotFoundError(
-                "config.yaml not found. "
-                "Specify with --config or create ./tval/config.yaml."
-            )
+    resolved_path = _discover_config_path(config_path)
 
-    with open(config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    with open(resolved_path, encoding="utf-8") as f:
+        raw_config = yaml.safe_load(f)
+    config = ProjectConfig.model_validate(raw_config)
 
-    # 2. Resolve paths relative to config.yaml's parent directory
-    project_root = Path(config_path).resolve().parent
-    db_path = project_root / config["database_path"]
-    schema_dir = project_root / config["schema_dir"]
-    output_path_cfg = project_root / config["output_path"]
+    # Resolve paths relative to config.yaml's parent directory
+    project_root = Path(resolved_path).resolve().parent
+    db_path = project_root / config.database_path
+    schema_dir = project_root / config.schema_dir
+    output_path_cfg = project_root / config.output_path
 
-    # Validate database_path extension
-    if db_path.suffix != ".duckdb":
-        raise ValueError(f"database_path must have .duckdb extension: {db_path}")
-
-    # 3. Load schema YAML files
+    # Load schema YAML files
     table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
 
-    # 3.5. Load relations (optional)
-    relations_path_cfg = config.get("relations_path")
+    # Load relations (optional)
     relations: list[RelationDef] = []
-    if relations_path_cfg:
-        relations_file = project_root / relations_path_cfg
+    if config.relations_path:
+        relations_file = project_root / config.relations_path
         relations = load_relations(str(relations_file))
         validate_relation_refs(relations, table_defs)
 
-    # 4. Determine load order via DAG
+    # Determine load order via DAG
     ordered_defs = build_load_order(table_defs)
 
-    # 5. Connect to DuckDB (delete and recreate existing file)
+    # Connect to DuckDB (delete and recreate existing file)
     if db_path.exists():
         db_path.unlink()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with duckdb.connect(str(db_path)) as conn_rw:
-        # 6. Create tables and load files
-        create_tables(conn_rw, ordered_defs)
-        confidence_threshold: float = config.get("encoding_confidence_threshold", 0.8)
+        all_load_errors = _load_data(
+            conn_rw, ordered_defs, config.encoding_confidence_threshold
+        )
 
-        all_load_errors: dict[str, list[LoadError]] = {}
-        for tdef in ordered_defs:
-            load_errors = load_files(
-                conn_rw, tdef, confidence_threshold=confidence_threshold
-            )
-            all_load_errors[tdef.table.name] = load_errors
-
-    # 7. Run checks/profiler on a read-only connection
+    # Run checks/profiler on a read-only connection
     relation_check_results: list[CheckResult] = []
     with duckdb.connect(str(db_path), read_only=True) as conn_ro:
-        table_reports: list[TableReport] = []
-        for tdef in ordered_defs:
-            load_errors = all_load_errors[tdef.table.name]
-            check_results, agg_check_results = run_checks(conn_ro, tdef, load_errors)
-            profiles = profile_table(conn_ro, tdef, load_errors)
-
-            table_reports.append(
-                TableReport(
-                    table_def=tdef,
-                    load_errors=load_errors,
-                    check_results=check_results,
-                    agg_check_results=agg_check_results,
-                    profiles=profiles,
-                    export_result=None,
-                )
-            )
-
-        # 7.5. Run relation checks
+        table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
         if relations:
             relation_check_results = run_relation_checks(
                 conn_ro, relations, all_load_errors
             )
 
-    # 8. Export
+    # Export
     if export:
-        tables_ok = all(r.overall_status == "OK" for r in table_reports)
+        tables_ok = all(r.overall_status == CheckStatus.OK for r in table_reports)
         relations_ok = all(
-            r.status in ("OK", "SKIPPED") for r in relation_check_results
+            r.status in (CheckStatus.OK, CheckStatus.SKIPPED)
+            for r in relation_check_results
         )
         all_ok = tables_ok and relations_ok
         output_base_dir = output_path_cfg.parent / "parquet"
         with duckdb.connect(str(db_path), read_only=True) as conn_ro:
-            for report, tdef in zip(table_reports, ordered_defs):
+            for report, tdef in zip(table_reports, ordered_defs, strict=True):
                 if not all_ok:
                     report.export_result = ExportResult(
                         table_name=tdef.table.name,
-                        status="SKIPPED",
+                        status=ExportStatus.SKIPPED,
                         output_path="",
                         message="Skipped because tables with validation failures exist",
                     )
                 else:
                     report.export_result = export_table(conn_ro, tdef, output_base_dir)
 
-    # 9. Generate report
+    # Generate report
     output_path_cfg.parent.mkdir(parents=True, exist_ok=True)
     generate_report(
         table_reports=table_reports,

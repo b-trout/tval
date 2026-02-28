@@ -211,6 +211,64 @@ def parse_duckdb_error(file_path: str, message: str) -> LoadError:
     )
 
 
+def _insert_csv(
+    conn: duckdb.DuckDBPyConnection,
+    tdef: TableDef,
+    file_path: str,
+    select_clause: str,
+    columns_override: str,
+    confidence_threshold: float,
+) -> None:
+    """Insert a CSV file into the corresponding DuckDB table."""
+    table_name = quote_identifier(tdef.table.name)
+    resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
+    try:
+        sql = (
+            f"INSERT INTO {table_name} {select_clause} "
+            f"FROM read_csv(?, header=true, "
+            f"columns={columns_override})"
+        )
+        conn.execute(sql, [resolved_path])
+    finally:
+        if is_tmp:
+            Path(resolved_path).unlink(missing_ok=True)
+
+
+def _insert_xlsx(
+    conn: duckdb.DuckDBPyConnection,
+    tdef: TableDef,
+    file_path: str,
+    select_clause: str,
+    columns_override: str,
+) -> None:
+    """Insert an XLSX file into the corresponding DuckDB table."""
+    table_name = quote_identifier(tdef.table.name)
+    if columns_override:
+        sql = (
+            f"INSERT INTO {table_name} {select_clause} "
+            f"FROM read_xlsx(?, header=true, "
+            f"types={columns_override})"
+        )
+    else:
+        sql = f"INSERT INTO {table_name} {select_clause} FROM read_xlsx(?, header=true)"
+    conn.execute(sql, [file_path])
+
+
+def _insert_parquet(
+    conn: duckdb.DuckDBPyConnection,
+    tdef: TableDef,
+    file_path: str,
+    select_clause: str,
+) -> None:
+    """Insert a Parquet file into the corresponding DuckDB table."""
+    table_name = quote_identifier(tdef.table.name)
+    # NOTE: read_parquet does not support a columns override parameter.
+    # format + Parquet combination is not yet supported; STRPTIME in
+    # select_clause may fail on already-typed Parquet columns.
+    sql = f"INSERT INTO {table_name} {select_clause} FROM read_parquet(?)"
+    conn.execute(sql, [file_path])
+
+
 def _insert_file(
     conn: duckdb.DuckDBPyConnection,
     tdef: TableDef,
@@ -219,40 +277,29 @@ def _insert_file(
     confidence_threshold: float,
 ) -> LoadError | None:
     """Insert a single data file into the corresponding DuckDB table."""
-    table_name = quote_identifier(tdef.table.name)
     select_clause = _build_insert_select(tdef)
     columns_override = _build_columns_override(tdef)
-    resolved_path: str | None = None
-    is_tmp = False
 
     try:
         if ext == ".csv":
-            resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
-            sql = (
-                f"INSERT INTO {table_name} {select_clause} "
-                f"FROM read_csv(?, header=true, "
-                f"columns={columns_override})"
+            _insert_csv(
+                conn,
+                tdef,
+                file_path,
+                select_clause,
+                columns_override,
+                confidence_threshold,
             )
-            conn.execute(sql, [resolved_path])
         elif ext == ".parquet":
-            # NOTE: read_parquet does not support a columns override parameter.
-            # format + Parquet combination is not yet supported; STRPTIME in
-            # select_clause may fail on already-typed Parquet columns.
-            sql = f"INSERT INTO {table_name} {select_clause} FROM read_parquet(?)"
-            conn.execute(sql, [file_path])
+            _insert_parquet(conn, tdef, file_path, select_clause)
         elif ext == ".xlsx":
-            if columns_override:
-                sql = (
-                    f"INSERT INTO {table_name} {select_clause} "
-                    f"FROM read_xlsx(?, header=true, "
-                    f"types={columns_override})"
-                )
-            else:
-                sql = (
-                    f"INSERT INTO {table_name} {select_clause} "
-                    f"FROM read_xlsx(?, header=true)"
-                )
-            conn.execute(sql, [file_path])
+            _insert_xlsx(
+                conn,
+                tdef,
+                file_path,
+                select_clause,
+                columns_override,
+            )
         return None
     except EncodingDetectionError as e:
         logger.error(
@@ -282,9 +329,6 @@ def _insert_file(
             },
         )
         return error
-    finally:
-        if is_tmp and resolved_path:
-            Path(resolved_path).unlink(missing_ok=True)
 
 
 def load_files(

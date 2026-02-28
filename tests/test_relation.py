@@ -7,6 +7,7 @@ from pathlib import Path
 import duckdb
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from tval.loader import LoadError
 from tval.parser import TableDef
@@ -16,6 +17,7 @@ from tval.relation import (
     run_relation_checks,
     validate_relation_refs,
 )
+from tval.status import CheckStatus
 
 
 def _make_relation(
@@ -106,7 +108,7 @@ class TestLoadRelations:
         }
         path = tmp_path / "relations.yaml"
         path.write_text(yaml.dump(yaml_content), encoding="utf-8")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             load_relations(path)
 
 
@@ -153,7 +155,7 @@ class TestRunRelationChecks:
         rel = _make_relation("1:1", "users", ["user_id"], "profiles", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         assert len(results) == 4
-        assert all(r.status == "OK" for r in results)
+        assert all(r.status == CheckStatus.OK for r in results)
 
     def test_one_to_one_duplicate_ng(self) -> None:
         """Duplicate on one side of 1:1 should return NG."""
@@ -165,7 +167,7 @@ class TestRunRelationChecks:
         rel = _make_relation("1:1", "users", ["user_id"], "profiles", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         statuses = [r.status for r in results]
-        assert "NG" in statuses
+        assert CheckStatus.NG in statuses
 
     def test_one_to_n_ok(self) -> None:
         """Valid 1:N relationship should return all OK."""
@@ -177,7 +179,7 @@ class TestRunRelationChecks:
         rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         assert len(results) == 2
-        assert all(r.status == "OK" for r in results)
+        assert all(r.status == CheckStatus.OK for r in results)
 
     def test_one_to_n_orphan_ng(self) -> None:
         """Orphan FK in N side should return NG."""
@@ -189,7 +191,7 @@ class TestRunRelationChecks:
         rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         statuses = [r.status for r in results]
-        assert "NG" in statuses
+        assert CheckStatus.NG in statuses
 
     def test_n_to_one_ok(self) -> None:
         """Valid N:1 relationship should return all OK."""
@@ -201,7 +203,7 @@ class TestRunRelationChecks:
         rel = _make_relation("N:1", "orders", ["user_id"], "users", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         assert len(results) == 2
-        assert all(r.status == "OK" for r in results)
+        assert all(r.status == CheckStatus.OK for r in results)
 
     def test_skipped_on_load_errors(self) -> None:
         """Relation checks should be SKIPPED when either table has errors."""
@@ -221,7 +223,7 @@ class TestRunRelationChecks:
             ]
         }
         results = run_relation_checks(conn, [rel], load_errors)
-        assert all(r.status == "SKIPPED" for r in results)
+        assert all(r.status == CheckStatus.SKIPPED for r in results)
 
     def test_null_values_excluded(self) -> None:
         """NULL FK values should not count as referential violations."""
@@ -232,4 +234,4 @@ class TestRunRelationChecks:
         conn.execute('INSERT INTO "orders" VALUES (1), (NULL)')
         rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
-        assert all(r.status == "OK" for r in results)
+        assert all(r.status == CheckStatus.OK for r in results)

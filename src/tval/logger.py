@@ -24,7 +24,6 @@ _RESERVED = {
     "levelname",
     "levelno",
     "lineno",
-    "module",
     "msecs",
     "pathname",
     "process",

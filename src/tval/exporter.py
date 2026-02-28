@@ -14,6 +14,7 @@ import duckdb
 from .builder import quote_identifier
 from .logger import get_logger
 from .parser import TableDef
+from .status import ExportStatus
 
 logger = get_logger(__name__)
 
@@ -28,7 +29,7 @@ class ExportResult:
     """Result of a single table export operation."""
 
     table_name: str
-    status: str  # "OK" | "SKIPPED" | "ERROR"
+    status: ExportStatus
     output_path: str
     message: str = ""
 
@@ -65,13 +66,13 @@ def export_table(
 
         return ExportResult(
             table_name=table_name,
-            status="OK",
+            status=ExportStatus.OK,
             output_path=output_path,
         )
     except Exception as e:
         return ExportResult(
             table_name=table_name,
-            status="ERROR",
+            status=ExportStatus.ERROR,
             output_path=str(output_dir),
             message=str(e),
         )

@@ -7,6 +7,7 @@ import duckdb
 from tval.checker import run_checks
 from tval.loader import LoadError
 from tval.parser import CheckDef, ColumnDef, TableDef
+from tval.status import CheckStatus
 
 
 def _make_tdef(
@@ -73,7 +74,7 @@ class TestChecker:
         tdef = _make_tdef(tmp_path, columns=[col])
         results, _ = run_checks(conn, tdef, [])
         assert len(results) == 1
-        assert results[0].status == "OK"
+        assert results[0].status == CheckStatus.OK
 
     def test_allowed_values_check_ng(self, tmp_path: object) -> None:
         """Values outside allowed range should return NG."""
@@ -90,7 +91,7 @@ class TestChecker:
         tdef = _make_tdef(tmp_path, columns=[col])
         results, _ = run_checks(conn, tdef, [])
         assert len(results) == 1
-        assert results[0].status == "NG"
+        assert results[0].status == CheckStatus.NG
 
     def test_user_defined_check_expect_zero_ok(self, tmp_path: object) -> None:
         """expect_zero=True with count=0 should return OK."""
@@ -104,7 +105,7 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, checks=[check])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "OK"
+        assert results[0].status == CheckStatus.OK
 
     def test_user_defined_check_expect_zero_ng(self, tmp_path: object) -> None:
         """expect_zero=True with count>0 should return NG."""
@@ -118,7 +119,7 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, checks=[check])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "NG"
+        assert results[0].status == CheckStatus.NG
 
     def test_user_defined_check_expect_non_zero_ok(self, tmp_path: object) -> None:
         """expect_zero=False with count>0 should return OK."""
@@ -132,7 +133,7 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, checks=[check])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "OK"
+        assert results[0].status == CheckStatus.OK
 
     def test_user_defined_check_expect_non_zero_ng(self, tmp_path: object) -> None:
         """expect_zero=False with count=0 should return NG."""
@@ -145,7 +146,7 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, checks=[check])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "NG"
+        assert results[0].status == CheckStatus.NG
 
     def test_check_with_invalid_sql_returns_error(self, tmp_path: object) -> None:
         """Broken SQL should return ERROR status instead of SKIPPED."""
@@ -158,7 +159,7 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, checks=[check])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "ERROR"
+        assert results[0].status == CheckStatus.ERROR
         assert results[0].message != ""
 
     def test_checks_skipped_on_load_errors(self, tmp_path: object) -> None:
@@ -181,7 +182,7 @@ class TestChecker:
             )
         ]
         results, _ = run_checks(conn, tdef, load_errors)
-        assert all(r.status == "SKIPPED" for r in results)
+        assert all(r.status == CheckStatus.SKIPPED for r in results)
 
     def test_aggregation_checks_skipped_on_load_errors(self, tmp_path: object) -> None:
         """Aggregation checks should be SKIPPED when load errors exist."""
@@ -203,7 +204,7 @@ class TestChecker:
             )
         ]
         _, agg_results = run_checks(conn, tdef, load_errors)
-        assert all(r.status == "SKIPPED" for r in agg_results)
+        assert all(r.status == CheckStatus.SKIPPED for r in agg_results)
 
     def test_allowed_values_with_null_values_ignored(self, tmp_path: object) -> None:
         """NULL values should not count as allowed_values violations."""
@@ -219,4 +220,4 @@ class TestChecker:
         )
         tdef = _make_tdef(tmp_path, columns=[col])
         results, _ = run_checks(conn, tdef, [])
-        assert results[0].status == "OK"
+        assert results[0].status == CheckStatus.OK

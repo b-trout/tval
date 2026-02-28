@@ -14,10 +14,11 @@ import yaml
 from pydantic import BaseModel
 
 from .builder import quote_identifier
-from .checker import CheckResult
+from .checker import CheckResult, make_skipped_result
 from .loader import LoadError
 from .logger import get_logger
-from .parser import TableDef
+from .parser import CheckDef, TableDef
+from .status import CheckStatus
 
 logger = get_logger(__name__)
 
@@ -110,7 +111,7 @@ def _build_referential_sql(
     NULLs are excluded (consistent with SQL FK semantics).
     """
     join_cond = " AND ".join(
-        f"s.{sc} = t.{tc}" for sc, tc in zip(source_cols, target_cols)
+        f"s.{sc} = t.{tc}" for sc, tc in zip(source_cols, target_cols, strict=True)
     )
     null_filter = " AND ".join(f"s.{sc} IS NOT NULL" for sc in source_cols)
     target_null = " AND ".join(f"t.{tc} IS NULL" for tc in target_cols)
@@ -238,35 +239,19 @@ def run_relation_checks(
                 skipped_tables.append(rel.from_.table)
             if to_errors:
                 skipped_tables.append(rel.to.table)
+            skip_msg = f"Skipped due to load errors in: {', '.join(skipped_tables)}"
             for desc, query in check_pairs:
-                logger.warning(
-                    "Relation check skipped",
-                    extra={
-                        "relation": rel.name,
-                        "check_description": desc,
-                    },
-                )
-                results.append(
-                    CheckResult(
-                        description=desc,
-                        query=query,
-                        status="SKIPPED",
-                        result_count=None,
-                        message=(
-                            "Skipped due to load errors in: "
-                            f"{', '.join(skipped_tables)}"
-                        ),
-                    )
-                )
+                check_def = CheckDef(description=desc, query=query)
+                results.append(make_skipped_result(check_def, rel.name, skip_msg))
             continue
 
         for desc, query in check_pairs:
             try:
                 row = conn.execute(query).fetchone()
                 count = int(row[0]) if row else 0
-                status = "OK" if count == 0 else "NG"
-                message = "" if status == "OK" else f"Result count: {count}"
-                if status == "NG":
+                status = CheckStatus.OK if count == 0 else CheckStatus.NG
+                message = "" if status == CheckStatus.OK else f"Result count: {count}"
+                if status == CheckStatus.NG:
                     logger.error(
                         "Relation check failed",
                         extra={
@@ -296,7 +281,7 @@ def run_relation_checks(
                     CheckResult(
                         description=desc,
                         query=query,
-                        status="ERROR",
+                        status=CheckStatus.ERROR,
                         result_count=None,
                         message=str(e),
                     )
