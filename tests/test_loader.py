@@ -200,9 +200,7 @@ class TestLoadFiles:
         row = conn.execute('SELECT COUNT(*) FROM "t"').fetchone()
         assert row is not None
         assert row[0] == 50
-        name = conn.execute(
-            'SELECT "name" FROM "t" WHERE "id" = 1'
-        ).fetchone()
+        name = conn.execute('SELECT "name" FROM "t" WHERE "id" = 1').fetchone()
         assert name is not None
         assert name[0] == "テスト名前1"
 
