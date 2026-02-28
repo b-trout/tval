@@ -1,0 +1,9 @@
+relations:
+  - name: "users-orders (1:N)"
+    cardinality: "1:N"
+    from:
+      table: users
+      columns: [user_id]
+    to:
+      table: orders
+      columns: [user_id]
