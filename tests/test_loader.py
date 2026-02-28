@@ -182,17 +182,57 @@ class TestLoadFiles:
         errors = load_files(conn, tdef)
         assert errors == []
 
+    def test_load_sjis_csv_file(self, tmp_path: Path) -> None:
+        """SJIS-encoded CSV files should be loaded correctly."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        csv_file = data_dir / "test.csv"
+        # Use enough rows for chardet to detect the encoding reliably
+        rows = "\n".join(f"{i},テスト名前{i}" for i in range(1, 51))
+        content = f"id,name\n{rows}\n"
+        csv_file.write_bytes(content.encode("cp932"))
+
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert errors == []
+        row = conn.execute('SELECT COUNT(*) FROM "t"').fetchone()
+        assert row is not None
+        assert row[0] == 50
+        name = conn.execute(
+            'SELECT "name" FROM "t" WHERE "id" = 1'
+        ).fetchone()
+        assert name is not None
+        assert name[0] == "テスト名前1"
+
 
 class TestResolveCsvPathUtf8:
     """Tests for _resolve_csv_path with UTF-8 content."""
 
-    def test_resolve_csv_path_utf8_passthrough(self, tmp_path: Path) -> None:
-        """UTF-8 CSV should return the original path without conversion."""
+    def test_resolve_csv_path_utf8_creates_tmp(self, tmp_path: Path) -> None:
+        """UTF-8 CSV should also create a temporary UTF-8 copy."""
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,name\n1,Alice\n", encoding="utf-8")
         resolved, is_tmp = _resolve_csv_path(str(csv_file), confidence_threshold=0.5)
-        assert resolved == str(csv_file)
-        assert is_tmp is False
+        assert resolved != str(csv_file)
+        assert is_tmp is True
+        # Verify temp file content matches
+        assert Path(resolved).read_text(encoding="utf-8") == "id,name\n1,Alice\n"
+        Path(resolved).unlink(missing_ok=True)
+
+    def test_resolve_csv_path_sjis_creates_tmp(self, tmp_path: Path) -> None:
+        """SJIS CSV should be converted to a temporary UTF-8 file."""
+        csv_file = tmp_path / "test.csv"
+        content = "id,名前\n1,太郎\n2,花子\n"
+        csv_file.write_bytes(content.encode("cp932"))
+        resolved, is_tmp = _resolve_csv_path(str(csv_file), confidence_threshold=0.5)
+        assert resolved != str(csv_file)
+        assert is_tmp is True
+        resolved_content = Path(resolved).read_text(encoding="utf-8")
+        assert "名前" in resolved_content
+        assert "太郎" in resolved_content
+        Path(resolved).unlink(missing_ok=True)
 
 
 class TestColExpr:
