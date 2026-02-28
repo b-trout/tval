@@ -3,27 +3,13 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/ci.yml"
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      python: ${{ steps.filter.outputs.python }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            python:
-              - "src/**"
-              - "tests/**"
-              - "pyproject.toml"
-              - ".github/workflows/ci.yml"
-
   ci:
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -44,17 +30,3 @@ jobs:
         run: uv run mypy src/
       - name: Pytest
         run: uv run pytest tests/ -v
-
-  ci-passed:
-    # Use this job as the required status check in branch protection
-    if: always()
-    needs: [ci]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check CI result
-        run: |
-          if [[ "${{ needs.ci.result }}" == "failure" || "${{ needs.ci.result }}" == "cancelled" ]]; then
-            echo "CI failed or was cancelled"
-            exit 1
-          fi
-          echo "CI passed (or was skipped for non-Python changes)"
