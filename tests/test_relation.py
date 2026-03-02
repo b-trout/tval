@@ -12,9 +12,12 @@ from pydantic import ValidationError
 from tval.loader import LoadError
 from tval.parser import TableDef
 from tval.relation import (
+    CrossCheckDef,
     RelationDef,
     load_relations,
+    run_cross_checks,
     run_relation_checks,
+    validate_cross_check_refs,
     validate_relation_refs,
 )
 from tval.status import CheckStatus
@@ -88,11 +91,11 @@ class TestLoadRelations:
         }
         path = tmp_path / "relations.yaml"
         path.write_text(yaml.dump(yaml_content), encoding="utf-8")
-        relations = load_relations(path)
-        assert len(relations) == 1
-        assert relations[0].cardinality == "1:N"
-        assert relations[0].from_.table == "users"
-        assert relations[0].to.table == "orders"
+        config = load_relations(path)
+        assert len(config.relations) == 1
+        assert config.relations[0].cardinality == "1:N"
+        assert config.relations[0].from_.table == "users"
+        assert config.relations[0].to.table == "orders"
 
     def test_invalid_cardinality_raises(self, tmp_path: Path) -> None:
         """Invalid cardinality value should raise ValidationError."""
@@ -110,6 +113,82 @@ class TestLoadRelations:
         path.write_text(yaml.dump(yaml_content), encoding="utf-8")
         with pytest.raises(ValidationError):
             load_relations(path)
+
+    def test_load_cross_checks(self, tmp_path: Path) -> None:
+        """YAML with both relations and cross_checks should parse successfully."""
+        yaml_content = {
+            "relations": [
+                {
+                    "name": "users-orders",
+                    "cardinality": "1:N",
+                    "from": {"table": "users", "columns": ["user_id"]},
+                    "to": {"table": "orders", "columns": ["user_id"]},
+                }
+            ],
+            "cross_checks": [
+                {
+                    "name": "All order users must have email",
+                    "tables": ["users", "orders"],
+                    "query": (
+                        'SELECT COUNT(*) FROM "orders" o '
+                        'JOIN "users" u ON o."user_id" = u."user_id" '
+                        'WHERE u."email" IS NULL'
+                    ),
+                    "expect_zero": True,
+                }
+            ],
+        }
+        path = tmp_path / "relations.yaml"
+        path.write_text(yaml.dump(yaml_content), encoding="utf-8")
+        config = load_relations(path)
+        assert len(config.relations) == 1
+        assert len(config.cross_checks) == 1
+        assert config.cross_checks[0].name == "All order users must have email"
+        assert config.cross_checks[0].tables == ["users", "orders"]
+
+    def test_load_cross_checks_only(self, tmp_path: Path) -> None:
+        """YAML with only cross_checks (no relations) should be valid."""
+        yaml_content = {
+            "cross_checks": [
+                {
+                    "name": "check1",
+                    "tables": ["a", "b"],
+                    "query": "SELECT 0",
+                }
+            ],
+        }
+        path = tmp_path / "relations.yaml"
+        path.write_text(yaml.dump(yaml_content), encoding="utf-8")
+        config = load_relations(path)
+        assert config.relations == []
+        assert len(config.cross_checks) == 1
+
+    def test_load_relations_backward_compat(self, tmp_path: Path) -> None:
+        """Existing relations-only YAML (no cross_checks) should still work."""
+        yaml_content = {
+            "relations": [
+                {
+                    "name": "r1",
+                    "cardinality": "1:N",
+                    "from": {"table": "a", "columns": ["id"]},
+                    "to": {"table": "b", "columns": ["id"]},
+                }
+            ]
+        }
+        path = tmp_path / "relations.yaml"
+        path.write_text(yaml.dump(yaml_content), encoding="utf-8")
+        config = load_relations(path)
+        assert len(config.relations) == 1
+        assert config.cross_checks == []
+
+    def test_cross_check_single_table_raises(self) -> None:
+        """cross_checks with only 1 table should raise ValidationError."""
+        with pytest.raises(ValidationError, match="at least 2 tables"):
+            CrossCheckDef(
+                name="bad",
+                tables=["only_one"],
+                query="SELECT 0",
+            )
 
 
 class TestValidateRelationRefs:
@@ -247,3 +326,151 @@ class TestRunRelationChecks:
         results = run_relation_checks(conn, [rel], {}, check_failed_tables={"users"})
         assert all(r.status == CheckStatus.SKIPPED for r in results)
         assert "check failed" in results[0].message
+
+
+class TestValidateCrossCheckRefs:
+    """Tests for cross-check reference validation."""
+
+    def test_validate_cross_check_undefined_table(self, tmp_path: Path) -> None:
+        """Referencing an undefined table should raise ValueError."""
+        tdefs = [_make_tdef(tmp_path, "users", ["user_id"])]
+        cc = CrossCheckDef(
+            name="bad ref",
+            tables=["users", "nonexistent"],
+            query="SELECT 0",
+        )
+        with pytest.raises(ValueError, match="undefined table"):
+            validate_cross_check_refs([cc], tdefs)
+
+    def test_valid_refs_no_error(self, tmp_path: Path) -> None:
+        """Valid table references should not raise."""
+        tdefs = [
+            _make_tdef(tmp_path, "users", ["user_id"]),
+            _make_tdef(tmp_path, "orders", ["user_id"]),
+        ]
+        cc = CrossCheckDef(
+            name="ok",
+            tables=["users", "orders"],
+            query="SELECT 0",
+        )
+        validate_cross_check_refs([cc], tdefs)
+
+
+class TestRunCrossChecks:
+    """Tests for cross-check execution."""
+
+    def test_run_cross_check_ok(self) -> None:
+        """COUNT=0 with expect_zero=True should return OK."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER, email TEXT)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        conn.execute("INSERT INTO \"users\" VALUES (1, 'a@b.com')")
+        conn.execute('INSERT INTO "orders" VALUES (1)')
+        cc = CrossCheckDef(
+            name="email check",
+            tables=["users", "orders"],
+            query=(
+                'SELECT COUNT(*) FROM "orders" o '
+                'JOIN "users" u ON o."user_id" = u."user_id" '
+                'WHERE u."email" IS NULL'
+            ),
+            expect_zero=True,
+        )
+        results = run_cross_checks(conn, [cc], {})
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.OK
+
+    def test_run_cross_check_ng(self) -> None:
+        """COUNT>0 with expect_zero=True should return NG."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER, email TEXT)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        conn.execute('INSERT INTO "users" VALUES (1, NULL)')
+        conn.execute('INSERT INTO "orders" VALUES (1)')
+        cc = CrossCheckDef(
+            name="email check",
+            tables=["users", "orders"],
+            query=(
+                'SELECT COUNT(*) FROM "orders" o '
+                'JOIN "users" u ON o."user_id" = u."user_id" '
+                'WHERE u."email" IS NULL'
+            ),
+            expect_zero=True,
+        )
+        results = run_cross_checks(conn, [cc], {})
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.NG
+
+    def test_run_cross_check_expect_nonzero(self) -> None:
+        """COUNT>0 with expect_zero=False should return OK."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER, amount DOUBLE)')
+        conn.execute('INSERT INTO "users" VALUES (1)')
+        conn.execute('INSERT INTO "orders" VALUES (1, 100.0)')
+        cc = CrossCheckDef(
+            name="revenue check",
+            tables=["users", "orders"],
+            query=(
+                'SELECT SUM("amount") FROM "orders" o '
+                'JOIN "users" u ON o."user_id" = u."user_id"'
+            ),
+            expect_zero=False,
+        )
+        results = run_cross_checks(conn, [cc], {})
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.OK
+
+    def test_run_cross_check_skipped_on_load_errors(self) -> None:
+        """Cross-check should be SKIPPED when a referenced table has load errors."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        cc = CrossCheckDef(
+            name="check",
+            tables=["users", "orders"],
+            query="SELECT 0",
+        )
+        load_errors: dict[str, list[LoadError]] = {
+            "users": [
+                LoadError(
+                    file_path="f.csv",
+                    error_type="UNKNOWN",
+                    column=None,
+                    row=None,
+                    raw_message="err",
+                )
+            ]
+        }
+        results = run_cross_checks(conn, [cc], load_errors)
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.SKIPPED
+
+    def test_run_cross_check_skipped_on_check_failures(self) -> None:
+        """Cross-check should be SKIPPED when a referenced table has check failures."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        cc = CrossCheckDef(
+            name="check",
+            tables=["users", "orders"],
+            query="SELECT 0",
+        )
+        results = run_cross_checks(conn, [cc], {}, check_failed_tables={"orders"})
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.SKIPPED
+        assert "check failed" in results[0].message
+
+    def test_run_cross_check_sql_error(self) -> None:
+        """Invalid SQL should return ERROR status."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        cc = CrossCheckDef(
+            name="bad sql",
+            tables=["users", "orders"],
+            query="SELECT * FROM nonexistent_table",
+        )
+        results = run_cross_checks(conn, [cc], {})
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.ERROR
