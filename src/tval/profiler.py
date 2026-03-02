@@ -13,32 +13,9 @@ import duckdb
 from .builder import quote_identifier
 from .loader import LoadError
 from .logger import get_logger
-from .parser import TableDef
+from .parser import NUMERIC_TYPES, TableDef
 
 logger = get_logger(__name__)
-
-NUMERIC_TYPES = {
-    "INTEGER",
-    "INT",
-    "INT4",
-    "INT32",
-    "BIGINT",
-    "INT8",
-    "INT64",
-    "SMALLINT",
-    "INT2",
-    "INT16",
-    "TINYINT",
-    "INT1",
-    "HUGEINT",
-    "FLOAT",
-    "FLOAT4",
-    "REAL",
-    "DOUBLE",
-    "FLOAT8",
-    "DECIMAL",
-    "NUMERIC",
-}
 
 
 def _is_numeric(col_type: str) -> bool:

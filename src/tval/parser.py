@@ -15,6 +15,29 @@ from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 
 DATETIME_TYPES = {"DATE", "TIMESTAMP", "TIME"}
 
+NUMERIC_TYPES = {
+    "INTEGER",
+    "INT",
+    "INT4",
+    "INT32",
+    "BIGINT",
+    "INT8",
+    "INT64",
+    "SMALLINT",
+    "INT2",
+    "INT16",
+    "TINYINT",
+    "INT1",
+    "HUGEINT",
+    "FLOAT",
+    "FLOAT4",
+    "REAL",
+    "DOUBLE",
+    "FLOAT8",
+    "DECIMAL",
+    "NUMERIC",
+}
+
 
 class ProjectConfig(BaseModel):
     """Project configuration loaded from config.yaml."""
@@ -44,6 +67,8 @@ class ColumnDef(BaseModel):
     description: str = ""
     allowed_values: list[str] = []
     format: str | None = None
+    min: float | None = None
+    max: float | None = None
 
     @field_validator("type")
     @classmethod
@@ -71,6 +96,19 @@ class ColumnDef(BaseModel):
                     "format is only valid for DATE/TIMESTAMP/TIME types: "
                     f"type={self.type}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_min_max_type(self) -> ColumnDef:
+        """Ensure min/max fields are only used with numeric types."""
+        if self.min is not None or self.max is not None:
+            base_type = self.type.split("(")[0].strip()
+            if base_type not in NUMERIC_TYPES:
+                raise ValueError(
+                    f"min/max is only valid for numeric types: type={self.type}"
+                )
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError(f"min ({self.min}) must be <= max ({self.max})")
         return self
 
 
@@ -109,6 +147,13 @@ class CheckDef(BaseModel):
     params: list[Any] = []
 
 
+class RowConditionDef(BaseModel):
+    """Declarative row-level condition expressed as a SQL boolean expression."""
+
+    description: str
+    condition: str
+
+
 class TableConstraints(BaseModel):
     """Collection of all table-level constraints."""
 
@@ -117,6 +162,7 @@ class TableConstraints(BaseModel):
     unique: list[UniqueDef]
     checks: list[CheckDef]
     aggregation_checks: list[CheckDef]
+    row_conditions: list[RowConditionDef] = []
 
     @field_validator("primary_key", mode="before")
     @classmethod
