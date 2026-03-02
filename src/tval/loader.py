@@ -211,27 +211,64 @@ def parse_duckdb_error(file_path: str, message: str) -> LoadError:
     )
 
 
+def _check_extra_columns(
+    conn: duckdb.DuckDBPyConnection,
+    tdef: TableDef,
+    file_path: str,
+    ext: str,
+) -> LoadError | None:
+    """Check if the data file has columns not defined in the schema."""
+    try:
+        if ext == ".csv":
+            result = conn.execute(
+                "SELECT * FROM read_csv(?, header=true, auto_detect=true) LIMIT 0",
+                [file_path],
+            )
+        elif ext == ".xlsx":
+            result = conn.execute(
+                "SELECT * FROM read_xlsx(?, header=true) LIMIT 0",
+                [file_path],
+            )
+        elif ext == ".parquet":
+            result = conn.execute(
+                "SELECT * FROM read_parquet(?) LIMIT 0",
+                [file_path],
+            )
+        else:
+            return None
+
+        file_cols = {desc[0] for desc in result.description}
+        schema_cols = {col.name for col in tdef.columns}
+        extra = sorted(file_cols - schema_cols)
+
+        if extra:
+            return LoadError(
+                file_path=file_path,
+                error_type="EXTRA_COLUMNS",
+                column=None,
+                row=None,
+                raw_message=f"Extra columns not defined in schema: {', '.join(extra)}",
+            )
+        return None
+    except Exception:
+        return None  # INSERT will catch the actual error
+
+
 def _insert_csv(
     conn: duckdb.DuckDBPyConnection,
     tdef: TableDef,
     file_path: str,
     select_clause: str,
     columns_override: str,
-    confidence_threshold: float,
 ) -> None:
     """Insert a CSV file into the corresponding DuckDB table."""
     table_name = quote_identifier(tdef.table.name)
-    resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
-    try:
-        sql = (
-            f"INSERT INTO {table_name} {select_clause} "
-            f"FROM read_csv(?, header=true, "
-            f"columns={columns_override})"
-        )
-        conn.execute(sql, [resolved_path])
-    finally:
-        if is_tmp:
-            Path(resolved_path).unlink(missing_ok=True)
+    sql = (
+        f"INSERT INTO {table_name} {select_clause} "
+        f"FROM read_csv(?, header=true, "
+        f"columns={columns_override})"
+    )
+    conn.execute(sql, [file_path])
 
 
 def _insert_xlsx(
@@ -280,25 +317,26 @@ def _insert_file(
     select_clause = _build_insert_select(tdef)
     columns_override = _build_columns_override(tdef)
 
+    resolved_path = file_path
+    is_tmp = False
+
     try:
         if ext == ".csv":
-            _insert_csv(
-                conn,
-                tdef,
-                file_path,
-                select_clause,
-                columns_override,
-                confidence_threshold,
-            )
+            resolved_path, is_tmp = _resolve_csv_path(file_path, confidence_threshold)
+
+        # Check for extra columns before INSERT
+        extra_error = _check_extra_columns(conn, tdef, resolved_path, ext)
+        if extra_error:
+            extra_error.file_path = file_path  # Report original path
+            return extra_error
+
+        if ext == ".csv":
+            _insert_csv(conn, tdef, resolved_path, select_clause, columns_override)
         elif ext == ".parquet":
-            _insert_parquet(conn, tdef, file_path, select_clause)
+            _insert_parquet(conn, tdef, resolved_path, select_clause)
         elif ext == ".xlsx":
             _insert_xlsx(
-                conn,
-                tdef,
-                file_path,
-                select_clause,
-                columns_override,
+                conn, tdef, resolved_path, select_clause, columns_override
             )
         return None
     except EncodingDetectionError as e:
@@ -329,6 +367,9 @@ def _insert_file(
             },
         )
         return error
+    finally:
+        if is_tmp:
+            Path(resolved_path).unlink(missing_ok=True)
 
 
 def load_files(
