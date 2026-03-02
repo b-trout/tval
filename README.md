@@ -80,6 +80,9 @@ config.yaml          schema/*.yaml       relations.yaml (optional)
      Run relation checks  <----------------------+
               |
               v
+     Run cross-table checks
+              |
+              v
      Compute column statistics
               |
               v
@@ -350,6 +353,9 @@ tval run --export
 | `tval init`| `--dir`     | `./tval`           | Target directory for project skeleton        |
 | `tval run` | `--config`  | Auto-discover      | Path to `config.yaml`                        |
 | `tval run` | `--export`  | Disabled           | Export to Parquet if all validations pass     |
+| `tval run` | `--quiet`   | -                  | Suppress all output except errors             |
+| `tval run` | `--dry-run` | -                  | Validate config and schemas without loading data |
+| `tval`     | `--version` | -                  | Display version number and exit               |
 
 ### 3.7 Define Relations (Optional)
 
@@ -408,6 +414,34 @@ relations:
 
 > **Note:** If either table has data loading errors or validation check failures, all checks for that relation are marked `SKIPPED` (since the data is incomplete). Blank (NULL) values are excluded from cross-table existence checks.
 
+#### Cross-Table Checks (Optional)
+
+In addition to cardinality relations, you can define custom SQL checks that span multiple tables. Add a `cross_checks` section to `relations.yaml`:
+
+```yaml
+cross_checks:
+  - name: order_amount_matches_details
+    tables: [orders, order_details]
+    query: |
+      SELECT COUNT(*) FROM "orders" o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount) AS total
+        FROM "order_details"
+        GROUP BY order_id
+      ) d ON o.order_id = d.order_id
+      WHERE o.amount != d.total
+    expect_zero: true
+```
+
+| Field         | Type       | Required | Default | Description                                              |
+|---------------|------------|----------|---------|----------------------------------------------------------|
+| `name`        | `string`   | Yes      | -       | Human-readable name for the check                        |
+| `tables`      | `string[]` | Yes      | -       | Tables referenced by the query (minimum 2)               |
+| `query`       | `string`   | Yes      | -       | SQL query that returns a single integer                  |
+| `expect_zero` | `bool`     | No       | `true`  | `true` = pass when 0 (no violations); `false` = pass when > 0 |
+
+> **Note:** Cross-check queries run on a read-only connection. If any referenced table has load errors or check failures, the check is marked `SKIPPED`. The `tables` field must list at least 2 tables.
+
 ### 3.8 Understanding the HTML Report
 
 The generated HTML report contains the following sections:
@@ -421,6 +455,7 @@ The generated HTML report contains the following sections:
 | **Statistics** (per table)         | Column profiles: count, nulls, unique, mean, std, min, max, percentiles |
 | **Export** (per table)             | Parquet export status (only when `--export` is used)                |
 | **Relation Cardinality Validation**| Cross-table relation check results (only when `relations_path` is configured) |
+| **Cross-Table Validation**         | User-defined cross-table SQL check results (only when `cross_checks` is defined) |
 
 #### Status Definitions
 
@@ -435,8 +470,8 @@ The generated HTML report contains the following sections:
 
 Parquet export is triggered by the `--export` flag and follows an **all-or-nothing** rule:
 
-- If **all tables** have `OK` status **and** all relation checks pass (or are skipped), every table is exported to Parquet.
-- If **any table** has `NG` status or any relation check fails, all exports are marked `SKIPPED`.
+- If **all tables** have `OK` status **and** all relation checks pass (or are skipped) **and** all cross-table checks pass (or are skipped), every table is exported to Parquet.
+- If **any table** has `NG` status, or any relation check fails, or any cross-table check fails, all exports are marked `SKIPPED`.
 
 Export output is written to `<output_path_parent>/parquet/<table_name>/`.
 
@@ -507,7 +542,7 @@ Tests use **real DuckDB instances and real data files** (no mocking):
 | `test_profiler.py`     | Column statistics computation and error handling     |
 | `test_exporter.py`     | Parquet export with partitioning                     |
 | `test_reporter.py`     | HTML report generation and status aggregation        |
-| `test_relation.py`     | Relation cardinality validation (1:1, 1:N, N:1, N:N)|
+| `test_relation.py`     | Relation cardinality validation (1:1, 1:N, N:1, N:N) and cross-table checks |
 | `test_integration.py`  | End-to-end pipeline validation                       |
 
 ### 4.4 CI Pipeline
