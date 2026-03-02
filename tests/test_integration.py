@@ -5,11 +5,13 @@ from __future__ import annotations
 import shutil
 from itertools import chain
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
 import yaml
 
 from tval.builder import build_load_order, create_tables
+from tval.init import run_init
 from tval.loader import load_files
 from tval.main import _build_table_reports, run
 from tval.parser import ProjectConfig, load_table_definitions
@@ -318,3 +320,62 @@ class TestIntegration:
         report = tmp_path / "tval" / "output" / "report.html"
         content = report.read_text(encoding="utf-8")
         assert "EXTRA_COLUMNS" in content
+
+
+class TestP0ErrorResilience:
+    """P0: Error resilience tests."""
+
+    def test_duckdb_connection_failure_exits(self, tmp_path: Path) -> None:
+        """DuckDB connection to a non-existent directory should raise SystemExit(1)."""
+        config_path = _setup_project(tmp_path)
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        config["database_path"] = "/nonexistent/path/work.duckdb"
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True)
+
+        import pytest
+
+        with pytest.raises(SystemExit) as exc_info:
+            run(str(config_path))
+        assert exc_info.value.code == 1
+
+    def test_output_dir_not_writable_exits(self, tmp_path: Path) -> None:
+        """Unwritable output directory should raise SystemExit(1)."""
+        config_path = _setup_project(tmp_path)
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        config["output_path"] = "/proc/fakedir/report.html"
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True)
+
+        import pytest
+
+        with pytest.raises(SystemExit) as exc_info:
+            run(str(config_path))
+        assert exc_info.value.code == 1
+
+    def test_init_rollback_on_failure(self, tmp_path: Path) -> None:
+        """Init should roll back created paths when mkdir fails partway."""
+        import pytest
+
+        target = tmp_path / "myproject"
+        call_count = 0
+        original_mkdir = Path.mkdir
+
+        def patched_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+            nonlocal call_count
+            # target, schema, data — fail on the 3rd subdir mkdir ("output")
+            if str(self).startswith(str(target)):
+                call_count += 1
+                if call_count == 4:  # target(1), schema(2), data(3), output(4)
+                    raise OSError("Simulated disk full")
+            original_mkdir(self, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", patched_mkdir):
+            with pytest.raises(SystemExit) as exc_info:
+                run_init(str(target))
+            assert exc_info.value.code == 1
+
+        # After rollback, nothing should remain
+        assert not target.exists()
