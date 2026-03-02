@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-03-02
+
+### Added
+
+- `cross_checks` section in `relations.yaml` for user-defined cross-table SQL checks
+- `CrossCheckDef` model with `tables` (min 2), `query`, `expect_zero` fields
+- `validate_cross_check_refs()` and `run_cross_checks()` in relation module
+- Cross-Table Validation section in HTML report
+- `--quiet`, `--dry-run` flags and `--version` option in CLI
+- DuckDB connection error handling (`SystemExit(1)`)
+- Output directory write permission validation (`SystemExit(1)`)
+- `_log_dry_run_summary()`, `_validate_output_dirs()`, `_connect_duckdb()` helpers in main module
+- `tval init` rollback on partial failure
+
+### Changed
+
+- `load_relations()` now returns `RelationsConfig` instead of `list[RelationDef]`
+- Export gate now considers cross-check results (tables + relations + cross-checks must all pass)
+- `generate_report()` accepts `cross_check_results` parameter
+- `run()` accepts `dry_run` parameter
+
 ## [0.3.1] - 2026-03-02
 
 ### Added
