@@ -406,7 +406,7 @@ relations:
 | `to.table`    | `string`   | Yes      | Table name (must match a schema YAML definition)      |
 | `to.columns`  | `string[]` | Yes      | Column(s) on the to-side of the relation              |
 
-> **Note:** If either table has data loading errors, all checks for that relation are marked `SKIPPED` (since the data is incomplete). Blank (NULL) values are excluded from cross-table existence checks.
+> **Note:** If either table has data loading errors or validation check failures, all checks for that relation are marked `SKIPPED` (since the data is incomplete). Blank (NULL) values are excluded from cross-table existence checks.
 
 ### 3.8 Understanding the HTML Report
 
@@ -429,7 +429,7 @@ The generated HTML report contains the following sections:
 | **OK**      | ✅   | Check passed — no issues found                                  |
 | **NG**      | ❌   | Check failed — data does not meet the expected rule (e.g. duplicates found, invalid values, constraint violation) |
 | **ERROR**   | ❌   | Check could not run — typically caused by a bug in the SQL query or an internal error. Review the error message and fix the query |
-| **SKIPPED** | ⚠️   | Check was not executed — this happens when data files failed to load. Fix the load errors first, then re-run to see these check results |
+| **SKIPPED** | ⚠️   | Check was not executed — this happens when data files failed to load or when validation checks failed (profiling and relation checks are skipped for tables with check failures). Fix the underlying errors first, then re-run |
 
 ### 3.9 Parquet Export
 

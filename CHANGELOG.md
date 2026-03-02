@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-03-02
+
+### Added
+
+- Extra columns detection: files with columns not defined in the schema now produce an `EXTRA_COLUMNS` load error before INSERT
+- Early termination: skip profiling when any check result is NG or ERROR (per-table scope)
+- Early termination: skip relation checks when either related table has check failures (`check_failed_tables` parameter in `run_relation_checks()`)
+
+### Changed
+
+- Refactored `_insert_file()` in loader to lift CSV encoding resolution and temp file cleanup to the caller level, simplifying `_insert_csv()`
+
 ## [0.3.0] - 2026-03-02
 
 ### Added
