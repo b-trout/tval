@@ -142,6 +142,45 @@ class TestIntegration:
         content = report.read_text(encoding="utf-8")
         assert "NG" in content
 
+    def test_run_with_range_violation(self, tmp_path: Path) -> None:
+        """Negative amount with min:0 should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,1,-50.0,pending\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content
+
+    def test_run_with_row_condition_violation(self, tmp_path: Path) -> None:
+        """row_conditions violation should produce an NG report."""
+        config_path = _setup_project(tmp_path)
+        # Add row_conditions to orders schema
+        schema_path = tmp_path / "tval" / "schema" / "orders.yaml"
+        with open(schema_path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+        doc["table_constraints"]["row_conditions"] = [
+            {
+                "description": "amount must be less than 10000",
+                "condition": "amount < 10000",
+            }
+        ]
+        with open(schema_path, "w", encoding="utf-8") as f:
+            yaml.dump(doc, f, allow_unicode=True)
+        # Write data that violates the condition
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,1,99999.0,pending\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "NG" in content
+
     def test_run_with_relations(self, tmp_path: Path) -> None:
         """Running tval with relations.yaml should validate cardinalities."""
         config_path = _setup_project(tmp_path)

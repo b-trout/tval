@@ -6,7 +6,7 @@ import duckdb
 
 from tval.checker import run_checks
 from tval.loader import LoadError
-from tval.parser import CheckDef, ColumnDef, TableDef
+from tval.parser import CheckDef, ColumnDef, RowConditionDef, TableDef
 from tval.status import CheckStatus
 
 
@@ -16,6 +16,7 @@ def _make_tdef(
     columns: list[ColumnDef] | None = None,
     checks: list[CheckDef] | None = None,
     aggregation_checks: list[CheckDef] | None = None,
+    row_conditions: list[RowConditionDef] | None = None,
     source_dir: str | None = None,
 ) -> TableDef:
     """Create a minimal TableDef for checker tests."""
@@ -49,6 +50,9 @@ def _make_tdef(
                 "checks": [c.model_dump() for c in checks] if checks else [],
                 "aggregation_checks": [c.model_dump() for c in aggregation_checks]
                 if aggregation_checks
+                else [],
+                "row_conditions": [rc.model_dump() for rc in row_conditions]
+                if row_conditions
                 else [],
             },
         },
@@ -221,3 +225,174 @@ class TestChecker:
         tdef = _make_tdef(tmp_path, columns=[col])
         results, _ = run_checks(conn, tdef, [])
         assert results[0].status == CheckStatus.OK
+
+    def test_range_check_ok(self, tmp_path: object) -> None:
+        """Values within range should return OK."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (5), (10), (50)')
+        col = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+            min=0,
+            max=100,
+        )
+        tdef = _make_tdef(tmp_path, columns=[col])
+        results, _ = run_checks(conn, tdef, [])
+        assert len(results) == 1
+        assert results[0].status == CheckStatus.OK
+
+    def test_range_check_ng_below_min(self, tmp_path: object) -> None:
+        """Value below min should return NG."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (-1), (10)')
+        col = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+            min=0,
+            max=100,
+        )
+        tdef = _make_tdef(tmp_path, columns=[col])
+        results, _ = run_checks(conn, tdef, [])
+        assert results[0].status == CheckStatus.NG
+
+    def test_range_check_ng_above_max(self, tmp_path: object) -> None:
+        """Value above max should return NG."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (10), (200)')
+        col = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+            min=0,
+            max=100,
+        )
+        tdef = _make_tdef(tmp_path, columns=[col])
+        results, _ = run_checks(conn, tdef, [])
+        assert results[0].status == CheckStatus.NG
+
+    def test_range_check_null_ignored(self, tmp_path: object) -> None:
+        """NULL values should not count as range violations."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (5), (NULL)')
+        col = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=False,
+            min=0,
+            max=100,
+        )
+        tdef = _make_tdef(tmp_path, columns=[col])
+        results, _ = run_checks(conn, tdef, [])
+        assert results[0].status == CheckStatus.OK
+
+    def test_range_check_skipped_on_load_errors(self, tmp_path: object) -> None:
+        """Range checks should be SKIPPED when load errors exist."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (val INTEGER)')
+        col = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+            min=0,
+            max=100,
+        )
+        tdef = _make_tdef(tmp_path, columns=[col])
+        load_errors = [
+            LoadError(
+                file_path="test.csv",
+                error_type="UNKNOWN",
+                column=None,
+                row=None,
+                raw_message="error",
+            )
+        ]
+        results, _ = run_checks(conn, tdef, load_errors)
+        assert all(r.status == CheckStatus.SKIPPED for r in results)
+
+    def test_row_condition_ok(self, tmp_path: object) -> None:
+        """Rows satisfying condition should return OK."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER, val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (1, 10), (2, 20)')
+        col_id = ColumnDef(
+            name="id",
+            logical_name="ID",
+            type="INTEGER",
+            not_null=True,
+        )
+        col_val = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+        )
+        rc = RowConditionDef(
+            description="val must be positive",
+            condition="val > 0",
+        )
+        tdef = _make_tdef(tmp_path, columns=[col_id, col_val], row_conditions=[rc])
+        results, _ = run_checks(conn, tdef, [])
+        rc_results = [r for r in results if r.description == "val must be positive"]
+        assert len(rc_results) == 1
+        assert rc_results[0].status == CheckStatus.OK
+
+    def test_row_condition_ng(self, tmp_path: object) -> None:
+        """Rows violating condition should return NG."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER, val INTEGER)')
+        conn.execute('INSERT INTO "t" VALUES (1, -5), (2, 20)')
+        col_id = ColumnDef(
+            name="id",
+            logical_name="ID",
+            type="INTEGER",
+            not_null=True,
+        )
+        col_val = ColumnDef(
+            name="val",
+            logical_name="Value",
+            type="INTEGER",
+            not_null=True,
+        )
+        rc = RowConditionDef(
+            description="val must be positive",
+            condition="val > 0",
+        )
+        tdef = _make_tdef(tmp_path, columns=[col_id, col_val], row_conditions=[rc])
+        results, _ = run_checks(conn, tdef, [])
+        rc_results = [r for r in results if r.description == "val must be positive"]
+        assert len(rc_results) == 1
+        assert rc_results[0].status == CheckStatus.NG
+
+    def test_row_condition_skipped_on_load_errors(self, tmp_path: object) -> None:
+        """Row condition checks should be SKIPPED when load errors exist."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER)')
+        rc = RowConditionDef(
+            description="always true",
+            condition="1 = 1",
+        )
+        tdef = _make_tdef(tmp_path, row_conditions=[rc])
+        load_errors = [
+            LoadError(
+                file_path="test.csv",
+                error_type="UNKNOWN",
+                column=None,
+                row=None,
+                raw_message="error",
+            )
+        ]
+        results, _ = run_checks(conn, tdef, load_errors)
+        rc_results = [r for r in results if r.description == "always true"]
+        assert len(rc_results) == 1
+        assert rc_results[0].status == CheckStatus.SKIPPED

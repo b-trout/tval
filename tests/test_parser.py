@@ -95,6 +95,70 @@ class TestParserValid:
         status_col = [c for c in tdef.columns if c.name == "status"][0]
         assert status_col.allowed_values == ["active", "inactive"]
 
+    def test_min_max_parsed_on_numeric_column(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """min/max should be correctly parsed on a numeric column."""
+        data = _valid_data(data_dir)
+        data["columns"][0] = {  # type: ignore[index]
+            "name": "user_id",
+            "logical_name": "User ID",
+            "type": "INTEGER",
+            "not_null": True,
+            "min": 0,
+            "max": 1000,
+        }
+        path = _make_yaml(tmp_path, data)
+        tdef = load_table_definition(path, project_root=project_root)
+        col = [c for c in tdef.columns if c.name == "user_id"][0]
+        assert col.min == 0
+        assert col.max == 1000
+
+    def test_min_only_parsed(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """min-only without max should be accepted."""
+        data = _valid_data(data_dir)
+        data["columns"][0] = {  # type: ignore[index]
+            "name": "user_id",
+            "logical_name": "User ID",
+            "type": "INTEGER",
+            "not_null": True,
+            "min": 0,
+        }
+        path = _make_yaml(tmp_path, data)
+        tdef = load_table_definition(path, project_root=project_root)
+        col = [c for c in tdef.columns if c.name == "user_id"][0]
+        assert col.min == 0
+        assert col.max is None
+
+    def test_row_conditions_parsed(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """row_conditions should be correctly parsed into TableConstraints."""
+        data = _valid_data(data_dir)
+        data["table_constraints"]["row_conditions"] = [  # type: ignore[index]
+            {
+                "description": "user_id must be positive",
+                "condition": "user_id > 0",
+            }
+        ]
+        path = _make_yaml(tmp_path, data)
+        tdef = load_table_definition(path, project_root=project_root)
+        assert len(tdef.table_constraints.row_conditions) == 1
+        rc = tdef.table_constraints.row_conditions[0]
+        assert rc.description == "user_id must be positive"
+        assert rc.condition == "user_id > 0"
+
+    def test_row_conditions_defaults_to_empty(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """row_conditions should default to empty list when omitted."""
+        data = _valid_data(data_dir)
+        path = _make_yaml(tmp_path, data)
+        tdef = load_table_definition(path, project_root=project_root)
+        assert tdef.table_constraints.row_conditions == []
+
 
 class TestParserInvalid:
     """Tests for invalid schema definitions that should raise ValidationError."""
@@ -155,6 +219,41 @@ class TestParserInvalid:
         with pytest.raises(
             ValidationError, match="Column not found in export.partition_by"
         ):
+            load_table_definition(path, project_root=project_root)
+
+    def test_min_on_non_numeric_type(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """Using min on a non-numeric type should raise ValidationError."""
+        data = _valid_data(data_dir)
+        data["columns"][1] = {  # type: ignore[index]
+            "name": "name",
+            "logical_name": "Name",
+            "type": "VARCHAR",
+            "not_null": True,
+            "min": 0,
+        }
+        path = _make_yaml(tmp_path, data)
+        with pytest.raises(
+            ValidationError, match="min/max is only valid for numeric types"
+        ):
+            load_table_definition(path, project_root=project_root)
+
+    def test_min_greater_than_max(
+        self, tmp_path: Path, data_dir: Path, project_root: Path
+    ) -> None:
+        """min > max should raise ValidationError."""
+        data = _valid_data(data_dir)
+        data["columns"][0] = {  # type: ignore[index]
+            "name": "user_id",
+            "logical_name": "User ID",
+            "type": "INTEGER",
+            "not_null": True,
+            "min": 100,
+            "max": 10,
+        }
+        path = _make_yaml(tmp_path, data)
+        with pytest.raises(ValidationError, match="min .* must be <= max"):
             load_table_definition(path, project_root=project_root)
 
     def test_format_on_non_datetime_type(

@@ -18,6 +18,7 @@ columns:
     logical_name: Amount
     type: DOUBLE
     not_null: true
+    min: 0
 
   - name: status
     logical_name: Status
@@ -34,10 +35,7 @@ table_constraints:
       references:
         table: users
         columns: [user_id]
-  checks:
-    - description: Amount must be non-negative
-      query: "SELECT COUNT(*) FROM {table} WHERE amount < 0"
-      expect_zero: true
+  checks: []
   aggregation_checks: []
 
 export:
