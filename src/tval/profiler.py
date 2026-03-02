@@ -2,6 +2,7 @@
 
 Collects count, null count, unique count, and (for numeric columns) mean,
 standard deviation, skewness, kurtosis, min, percentiles, and max.
+For date/time columns, collects min and max only.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import duckdb
 from .builder import quote_identifier
 from .loader import LoadError
 from .logger import get_logger
-from .parser import NUMERIC_TYPES, TableDef
+from .parser import DATETIME_TYPES, NUMERIC_TYPES, TableDef
 
 logger = get_logger(__name__)
 
@@ -24,6 +25,12 @@ def _is_numeric(col_type: str) -> bool:
     return base_type in NUMERIC_TYPES
 
 
+def _is_temporal(col_type: str) -> bool:
+    """Check whether a column type is a date/time type based on its base type name."""
+    base_type = col_type.split("(")[0].strip()
+    return base_type in DATETIME_TYPES
+
+
 @dataclass
 class ColumnProfile:
     """Descriptive statistics for a single table column."""
@@ -32,6 +39,7 @@ class ColumnProfile:
     logical_name: str
     column_type: str
     is_numeric: bool
+    is_temporal: bool
     count: int
     not_null_count: int
     unique_count: int
@@ -39,11 +47,11 @@ class ColumnProfile:
     std: float | None
     skewness: float | None
     kurtosis: float | None
-    min: float | None
+    min: float | str | None
     p25: float | None
     median: float | None
     p75: float | None
-    max: float | None
+    max: float | str | None
     error: str | None = None
 
 
@@ -77,6 +85,7 @@ def profile_table(
     for col in tdef.columns:
         qcol = quote_identifier(col.name)
         numeric = _is_numeric(col.type)
+        temporal = _is_temporal(col.type)
 
         try:
             # Common statistics
@@ -93,16 +102,16 @@ def profile_table(
             not_null_count = int(common_row[1])
             unique_count = int(common_row[2])
 
-            # Numeric type additional statistics
-            mean = None
-            std = None
-            skewness = None
-            kurtosis = None
-            min_val = None
-            p25 = None
-            median_val = None
-            p75 = None
-            max_val = None
+            # Numeric / temporal additional statistics
+            mean: float | None = None
+            std: float | None = None
+            skewness: float | None = None
+            kurtosis: float | None = None
+            min_val: float | str | None = None
+            p25: float | None = None
+            median_val: float | None = None
+            p75: float | None = None
+            max_val: float | str | None = None
 
             if numeric:
                 num_sql = (
@@ -132,6 +141,12 @@ def profile_table(
                     median_val = _to_float(num_row[6])
                     p75 = _to_float(num_row[7])
                     max_val = _to_float(num_row[8])
+            elif temporal:
+                temp_sql = f"SELECT MIN({qcol}), MAX({qcol}) FROM {qtable}"
+                temp_row = conn.execute(temp_sql).fetchone()
+                if temp_row:
+                    min_val = str(temp_row[0]) if temp_row[0] is not None else None
+                    max_val = str(temp_row[1]) if temp_row[1] is not None else None
 
             profiles.append(
                 ColumnProfile(
@@ -139,6 +154,7 @@ def profile_table(
                     logical_name=col.logical_name,
                     column_type=col.type,
                     is_numeric=numeric,
+                    is_temporal=temporal,
                     count=count,
                     not_null_count=not_null_count,
                     unique_count=unique_count,
@@ -165,6 +181,7 @@ def profile_table(
                     logical_name=col.logical_name,
                     column_type=col.type,
                     is_numeric=numeric,
+                    is_temporal=temporal,
                     count=0,
                     not_null_count=0,
                     unique_count=0,

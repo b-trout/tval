@@ -7,8 +7,8 @@ from pathlib import Path
 import duckdb
 
 from tval.loader import LoadError
-from tval.parser import TableDef
-from tval.profiler import NUMERIC_TYPES, _is_numeric, profile_table
+from tval.parser import DATETIME_TYPES, TableDef
+from tval.profiler import NUMERIC_TYPES, _is_numeric, _is_temporal, profile_table
 
 
 def _make_tdef(
@@ -172,3 +172,70 @@ class TestProfiler:
         assert len(profiles) == 1
         assert profiles[0].error is not None
         assert profiles[0].count == 0
+
+    def test_profile_date_column(self, tmp_path: object) -> None:
+        """DATE columns should have is_temporal=True with min/max as strings."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (d DATE)')
+        conn.execute(
+            "INSERT INTO \"t\" VALUES ('2024-01-01'), ('2024-06-15'), ('2024-12-31')"
+        )
+        tdef = _make_tdef(
+            tmp_path,
+            [
+                {
+                    "name": "d",
+                    "logical_name": "Date",
+                    "type": "DATE",
+                    "not_null": True,
+                },
+            ],
+        )
+        profiles = profile_table(conn, tdef, [])
+        assert len(profiles) == 1
+        p = profiles[0]
+        assert p.is_temporal is True
+        assert p.is_numeric is False
+        assert p.count == 3
+        assert p.not_null_count == 3
+        assert isinstance(p.min, str)
+        assert isinstance(p.max, str)
+        assert "2024-01-01" in p.min
+        assert "2024-12-31" in p.max
+        assert p.mean is None
+        assert p.std is None
+        assert p.p25 is None
+
+    def test_profile_timestamp_column(self, tmp_path: object) -> None:
+        """TIMESTAMP columns should have min/max as strings."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (ts TIMESTAMP)')
+        conn.execute(
+            "INSERT INTO \"t\" VALUES ('2024-01-01 00:00:00'), ('2024-12-31 23:59:59')"
+        )
+        tdef = _make_tdef(
+            tmp_path,
+            [
+                {
+                    "name": "ts",
+                    "logical_name": "Timestamp",
+                    "type": "TIMESTAMP",
+                    "not_null": True,
+                },
+            ],
+        )
+        profiles = profile_table(conn, tdef, [])
+        assert len(profiles) == 1
+        p = profiles[0]
+        assert p.is_temporal is True
+        assert isinstance(p.min, str)
+        assert isinstance(p.max, str)
+        assert "2024-01-01" in p.min
+        assert "2024-12-31" in p.max
+
+    def test_is_temporal_types(self) -> None:
+        """Each type in DATETIME_TYPES should be recognized as temporal."""
+        for t in DATETIME_TYPES:
+            assert _is_temporal(t) is True
+        assert _is_temporal("VARCHAR") is False
+        assert _is_temporal("INTEGER") is False
