@@ -9,8 +9,10 @@ from pathlib import Path
 import duckdb
 import yaml
 
+from tval.builder import build_load_order, create_tables
 from tval.loader import load_files
 from tval.main import _build_table_reports, run
+from tval.parser import ProjectConfig, load_table_definitions
 from tval.status import CheckStatus
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -228,9 +230,6 @@ class TestIntegration:
         with open(config_path, encoding="utf-8") as f:
             raw_config = yaml.safe_load(f)
 
-        from tval.parser import ProjectConfig, load_table_definitions
-        from tval.builder import build_load_order, create_tables
-
         config = ProjectConfig.model_validate(raw_config)
         project_root = Path(config_path).resolve().parent
         db_path = project_root / config.database_path
@@ -252,16 +251,23 @@ class TestIntegration:
             table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
 
         # Orders should have NG checks and empty profiles
-        orders_report = next(r for r in table_reports if r.table_def.table.name == "orders")
+        orders_report = next(
+            r for r in table_reports if r.table_def.table.name == "orders"
+        )
         has_ng = any(
             cr.status == CheckStatus.NG
-            for cr in chain(orders_report.check_results, orders_report.agg_check_results)
+            for cr in chain(
+                orders_report.check_results,
+                orders_report.agg_check_results,
+            )
         )
         assert has_ng
         assert orders_report.profiles == []
 
         # Users should still have profiles (no check failures)
-        users_report = next(r for r in table_reports if r.table_def.table.name == "users")
+        users_report = next(
+            r for r in table_reports if r.table_def.table.name == "users"
+        )
         assert users_report.profiles != []
 
     def test_run_with_check_ng_skips_relation(self, tmp_path: Path) -> None:
