@@ -9,6 +9,7 @@ import pytest
 
 from tval.loader import (
     EncodingDetectionError,
+    _check_extra_columns,
     _col_expr,
     _resolve_csv_path,
     load_files,
@@ -256,3 +257,48 @@ class TestColExpr:
         assert "STRPTIME" in expr
         assert "%Y-%m-%d" in expr
         assert "created_at" in expr
+
+
+class TestCheckExtraColumns:
+    """Tests for _check_extra_columns detection."""
+
+    def test_csv_with_extra_columns(self, tmp_path: Path) -> None:
+        """CSV with columns not in schema should return EXTRA_COLUMNS error."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        csv_file = data_dir / "test.csv"
+        csv_file.write_text("id,name,extra_col\n1,Alice,foo\n", encoding="utf-8")
+
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        error = _check_extra_columns(conn, tdef, str(csv_file), ".csv")
+        assert error is not None
+        assert error.error_type == "EXTRA_COLUMNS"
+        assert "extra_col" in error.raw_message
+
+    def test_csv_without_extra_columns(self, tmp_path: Path) -> None:
+        """CSV with only schema columns should return None."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        csv_file = data_dir / "test.csv"
+        csv_file.write_text("id,name\n1,Alice\n", encoding="utf-8")
+
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        error = _check_extra_columns(conn, tdef, str(csv_file), ".csv")
+        assert error is None
+
+    def test_load_csv_with_extra_columns_returns_error(self, tmp_path: Path) -> None:
+        """load_files should return EXTRA_COLUMNS when CSV has extra columns."""
+        data_dir = tmp_path / "data" / "t"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        csv_file = data_dir / "test.csv"
+        csv_file.write_text("id,name,bonus\n1,Alice,100\n", encoding="utf-8")
+
+        tdef = _make_tdef(tmp_path, source_dir=str(data_dir))
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "t" (id INTEGER NOT NULL, name VARCHAR)')
+        errors = load_files(conn, tdef)
+        assert len(errors) == 1
+        assert errors[0].error_type == "EXTRA_COLUMNS"
+        assert "bonus" in errors[0].raw_message

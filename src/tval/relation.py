@@ -219,27 +219,36 @@ def run_relation_checks(
     conn: duckdb.DuckDBPyConnection,
     relations: list[RelationDef],
     all_load_errors: dict[str, list[LoadError]],
+    check_failed_tables: set[str] | None = None,
 ) -> list[CheckResult]:
     """Run cardinality validation checks for all defined relations.
 
-    If either table in a relation has load errors, all checks for that
-    relation are SKIPPED. Returns a flat list of CheckResult.
+    If either table in a relation has load errors or check failures,
+    all checks for that relation are SKIPPED. Returns a flat list of
+    CheckResult.
     """
     logger.info("Starting relation checks")
+    check_failed = check_failed_tables or set()
     results: list[CheckResult] = []
 
     for rel in relations:
         from_errors = all_load_errors.get(rel.from_.table, [])
         to_errors = all_load_errors.get(rel.to.table, [])
+        from_check_failed = rel.from_.table in check_failed
+        to_check_failed = rel.to.table in check_failed
         check_pairs = _build_relation_checks(rel)
 
-        if from_errors or to_errors:
+        if from_errors or to_errors or from_check_failed or to_check_failed:
             skipped_tables = []
             if from_errors:
                 skipped_tables.append(rel.from_.table)
             if to_errors:
                 skipped_tables.append(rel.to.table)
-            skip_msg = f"Skipped due to load errors in: {', '.join(skipped_tables)}"
+            if from_check_failed:
+                skipped_tables.append(f"{rel.from_.table} (check failed)")
+            if to_check_failed:
+                skipped_tables.append(f"{rel.to.table} (check failed)")
+            skip_msg = f"Skipped due to errors in: {', '.join(skipped_tables)}"
             for desc, query in check_pairs:
                 check_def = CheckDef(description=desc, query=query)
                 results.append(make_skipped_result(check_def, rel.name, skip_msg))

@@ -235,3 +235,15 @@ class TestRunRelationChecks:
         rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
         results = run_relation_checks(conn, [rel], {})
         assert all(r.status == CheckStatus.OK for r in results)
+
+    def test_skipped_on_check_failures(self) -> None:
+        """Relation checks should be SKIPPED when a table has check failures."""
+        conn = duckdb.connect()
+        conn.execute('CREATE TABLE "users" (user_id INTEGER)')
+        conn.execute('CREATE TABLE "orders" (user_id INTEGER)')
+        conn.execute('INSERT INTO "users" VALUES (1)')
+        conn.execute('INSERT INTO "orders" VALUES (1)')
+        rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
+        results = run_relation_checks(conn, [rel], {}, check_failed_tables={"users"})
+        assert all(r.status == CheckStatus.SKIPPED for r in results)
+        assert "check failed" in results[0].message
