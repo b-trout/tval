@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-03-02
+
+### Added
+
+- Declarative `min`/`max` constraints for numeric columns — auto-generates range check SQL in checker
+- Declarative `row_conditions` for table-level row validation — each condition is a SQL boolean expression auto-converted to a check query
+- MIN/MAX profiling for DATE, TIMESTAMP, and TIME columns
+- `NUMERIC_TYPES` constant in parser for numeric type validation
+- `RowConditionDef` Pydantic model for row-level condition definitions
+
+### Changed
+
+- Updated DESIGN.md with min/max and row_conditions specifications
+- Updated README.md with min/max and row_conditions documentation, YAML examples, and reference tables
+
 ## [0.2.1] - 2026-02-28
 
 ### Changed
