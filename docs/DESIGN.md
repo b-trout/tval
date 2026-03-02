@@ -550,7 +550,7 @@ DuckDBのエラーメッセージはバージョンアップで変更される�
 
 **数値型定義**: `NUMERIC_TYPES`セット（INTEGER/BIGINT/SMALLINT/TINYINT/HUGEINT/FLOAT/DOUBLE/DECIMAL等）。YAML定義の`type`フィールドで判定。
 
-**統計量**: 全型共通（`COUNT(*)`, `COUNT(col)`, `COUNT(DISTINCT col)`を一括SQL）。数値型追加（`AVG`, `STDDEV_SAMP`, `SKEWNESS`, `KURTOSIS`, `MIN`, `PERCENTILE_CONT(0.25/0.50/0.75)`, `MAX`を列ごと個別SQL）。
+**統計量**: 全型共通（`COUNT(*)`, `COUNT(col)`, `COUNT(DISTINCT col)`を一括SQL）。数値型追加（`AVG`, `STDDEV_SAMP`, `SKEWNESS`, `KURTOSIS`, `MIN`, `PERCENTILE_CONT(0.25/0.50/0.75)`, `MAX`を列ごと個別SQL）。日付・日時型（`DATETIME_TYPES`: DATE/TIMESTAMP/TIME）は`MIN`/`MAX`のみ計算し、値は`str()`で文字列化して格納。`ColumnProfile.is_temporal`フラグで判定。
 
 ---
 

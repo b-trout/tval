@@ -166,6 +166,11 @@
           <td>{{ p.median if p.median is not none else "-" }}</td>
           <td>{{ p.p75 if p.p75 is not none else "-" }}</td>
           <td>{{ p.max if p.max is not none else "-" }}</td>
+          {% elif p.is_temporal %}
+          <td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>{{ p.min if p.min is not none else "-" }}</td>
+          <td>-</td><td>-</td><td>-</td>
+          <td>{{ p.max if p.max is not none else "-" }}</td>
           {% else %}
           <td>-</td><td>-</td><td>-</td><td>-</td>
           <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
