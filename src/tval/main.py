@@ -23,9 +23,12 @@ from .logger import get_logger
 from .parser import ProjectConfig, TableDef, load_table_definitions
 from .profiler import profile_table
 from .relation import (
+    CrossCheckDef,
     RelationDef,
     load_relations,
+    run_cross_checks,
     run_relation_checks,
+    validate_cross_check_refs,
     validate_relation_refs,
 )
 from .reporter import TableReport, generate_report
@@ -134,6 +137,7 @@ def _build_table_reports(
 def _log_dry_run_summary(
     ordered_defs: list[TableDef],
     relations: list[RelationDef],
+    cross_checks: list[CrossCheckDef],
 ) -> None:
     """Log a summary of what would be validated in a full run."""
     total_columns = sum(len(td.columns) for td in ordered_defs)
@@ -142,11 +146,13 @@ def _log_dry_run_summary(
         for td in ordered_defs
     )
     logger.info(
-        "Dry-run summary: %d table(s), %d column(s), %d check(s), %d relation(s)",
+        "Dry-run summary: %d table(s), %d column(s), %d check(s), "
+        "%d relation(s), %d cross-check(s)",
         len(ordered_defs),
         total_columns,
         total_checks,
         len(relations),
+        len(cross_checks),
     )
 
 
@@ -189,12 +195,16 @@ def run(
     # Load schema YAML files
     table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
 
-    # Load relations (optional)
+    # Load relations and cross_checks (optional)
     relations: list[RelationDef] = []
+    cross_checks: list[CrossCheckDef] = []
     if config.relations_path:
         relations_file = project_root / config.relations_path
-        relations = load_relations(str(relations_file))
+        relations_config = load_relations(str(relations_file))
+        relations = relations_config.relations
+        cross_checks = relations_config.cross_checks
         validate_relation_refs(relations, table_defs)
+        validate_cross_check_refs(cross_checks, table_defs)
 
     # Determine load order via DAG
     ordered_defs = build_load_order(table_defs)
@@ -202,7 +212,7 @@ def run(
     if dry_run:
         if export:
             logger.warning("--export is ignored in dry-run mode")
-        _log_dry_run_summary(ordered_defs, relations)
+        _log_dry_run_summary(ordered_defs, relations, cross_checks)
         return
 
     # Connect to DuckDB (delete and recreate existing file)
@@ -216,6 +226,7 @@ def run(
 
     # Run checks/profiler on a read-only connection
     relation_check_results: list[CheckResult] = []
+    cross_check_results: list[CheckResult] = []
     with _connect_duckdb(db_path, read_only=True) as conn_ro:
         table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
 
@@ -234,6 +245,11 @@ def run(
                 conn_ro, relations, all_load_errors, check_failed_tables
             )
 
+        if cross_checks:
+            cross_check_results = run_cross_checks(
+                conn_ro, cross_checks, all_load_errors, check_failed_tables
+            )
+
     # Export
     if export:
         tables_ok = all(r.overall_status == CheckStatus.OK for r in table_reports)
@@ -241,7 +257,11 @@ def run(
             r.status in (CheckStatus.OK, CheckStatus.SKIPPED)
             for r in relation_check_results
         )
-        all_ok = tables_ok and relations_ok
+        cross_ok = all(
+            r.status in (CheckStatus.OK, CheckStatus.SKIPPED)
+            for r in cross_check_results
+        )
+        all_ok = tables_ok and relations_ok and cross_ok
         output_base_dir = output_path_cfg.parent / "parquet"
         with _connect_duckdb(db_path, read_only=True) as conn_ro:
             for report, tdef in zip(table_reports, ordered_defs, strict=True):
@@ -263,6 +283,7 @@ def run(
         db_path=str(db_path),
         executed_at=datetime.now().isoformat(),
         relation_check_results=relation_check_results,
+        cross_check_results=cross_check_results,
     )
 
     logger.info("tval execution completed")
