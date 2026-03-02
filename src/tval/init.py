@@ -35,22 +35,41 @@ def run_init(target_dir: str = "./tval") -> None:
         print(f"Error: {target} already exists. Will not overwrite.")  # noqa: T201
         raise SystemExit(1)
 
-    # Create directories
-    target.mkdir(parents=True)
-    (target / "schema").mkdir()
-    (target / "data").mkdir()
-    (target / "output").mkdir()
+    # Create directories and files, tracking paths for rollback on failure
+    created_paths: list[Path] = []
+    try:
+        target.mkdir(parents=True)
+        created_paths.append(target)
+        for subdir in ["schema", "data", "output"]:
+            sub = target / subdir
+            sub.mkdir()
+            created_paths.append(sub)
 
-    # Place .gitkeep files
-    for subdir in ["schema", "data", "output"]:
-        (target / subdir / ".gitkeep").touch()
+        # Place .gitkeep files
+        for subdir in ["schema", "data", "output"]:
+            gitkeep = target / subdir / ".gitkeep"
+            gitkeep.touch()
+            created_paths.append(gitkeep)
 
-    # Generate config.yaml
-    (target / "config.yaml").write_text(CONFIG_TEMPLATE, encoding="utf-8")
+        # Generate config.yaml
+        config_file = target / "config.yaml"
+        config_file.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+        created_paths.append(config_file)
+    except OSError as e:
+        print(f"Error: Failed to create project skeleton: {e}")  # noqa: T201
+        for path in reversed(created_paths):
+            try:
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+            except OSError:
+                pass
+        raise SystemExit(1) from e
 
     print(f"Created {target}/")  # noqa: T201
 
-    # Append to .gitignore
+    # Append to .gitignore (not rolled back — appending to existing file is harmless)
     gitignore_path = Path(".gitignore")
     existing_lines: set[str] = set()
     if gitignore_path.exists():

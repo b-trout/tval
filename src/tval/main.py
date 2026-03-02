@@ -7,6 +7,7 @@ report generation.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -31,6 +32,43 @@ from .reporter import TableReport, generate_report
 from .status import CheckStatus, ExportStatus
 
 logger = get_logger(__name__)
+
+
+def _connect_duckdb(
+    db_path: Path, *, read_only: bool = False
+) -> duckdb.DuckDBPyConnection:
+    """Open a DuckDB connection, converting failures to SystemExit(1)."""
+    try:
+        return duckdb.connect(str(db_path), read_only=read_only)
+    except duckdb.IOException as e:
+        logger.error(
+            "Failed to open database (I/O error): %s",
+            e,
+            extra={"db_path": str(db_path)},
+        )
+        raise SystemExit(1) from e
+    except Exception as e:
+        logger.error("Failed to open database: %s", e, extra={"db_path": str(db_path)})
+        raise SystemExit(1) from e
+
+
+def _validate_output_dirs(db_path: Path, output_path: Path) -> None:
+    """Ensure parent directories for db and output are writable, creating as needed."""
+    for label, path in [("database_path", db_path), ("output_path", output_path)]:
+        parent = path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(
+                "Cannot create directory for %s: %s",
+                label,
+                e,
+                extra={"path": str(parent)},
+            )
+            raise SystemExit(1) from e
+        if not os.access(parent, os.W_OK):
+            logger.error("Directory is not writable for %s: %s", label, str(parent))
+            raise SystemExit(1)
 
 
 def _discover_config_path(config_path: str | None) -> str:
@@ -146,6 +184,8 @@ def run(
     schema_dir = project_root / config.schema_dir
     output_path_cfg = project_root / config.output_path
 
+    _validate_output_dirs(db_path, output_path_cfg)
+
     # Load schema YAML files
     table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
 
@@ -169,14 +209,14 @@ def run(
     if db_path.exists():
         db_path.unlink()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with duckdb.connect(str(db_path)) as conn_rw:
+    with _connect_duckdb(db_path) as conn_rw:
         all_load_errors = _load_data(
             conn_rw, ordered_defs, config.encoding_confidence_threshold
         )
 
     # Run checks/profiler on a read-only connection
     relation_check_results: list[CheckResult] = []
-    with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+    with _connect_duckdb(db_path, read_only=True) as conn_ro:
         table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
 
         # Collect tables with check failures for relation skip
@@ -203,7 +243,7 @@ def run(
         )
         all_ok = tables_ok and relations_ok
         output_base_dir = output_path_cfg.parent / "parquet"
-        with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+        with _connect_duckdb(db_path, read_only=True) as conn_ro:
             for report, tdef in zip(table_reports, ordered_defs, strict=True):
                 if not all_ok:
                     report.export_result = ExportResult(
