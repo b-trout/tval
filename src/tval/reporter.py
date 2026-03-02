@@ -50,6 +50,7 @@ def generate_report(
     db_path: str,
     executed_at: str,
     relation_check_results: list[CheckResult] | None = None,
+    cross_check_results: list[CheckResult] | None = None,
 ) -> None:
     """Render the HTML report from Jinja2 template and write to output_path."""
     template_dir = Path(__file__).parent / "templates"
@@ -75,6 +76,16 @@ def generate_report(
         "skipped": sum(1 for r in rel_results if r.status == CheckStatus.SKIPPED),
     }
 
+    cc_results = cross_check_results or []
+    cross_check_summary = {
+        "total": len(cc_results),
+        "ok": sum(1 for r in cc_results if r.status == CheckStatus.OK),
+        "ng": sum(
+            1 for r in cc_results if r.status in (CheckStatus.NG, CheckStatus.ERROR)
+        ),
+        "skipped": sum(1 for r in cc_results if r.status == CheckStatus.SKIPPED),
+    }
+
     html = template.render(
         executed_at=executed_at,
         db_path=db_path,
@@ -82,6 +93,8 @@ def generate_report(
         summary=summary,
         relation_check_results=rel_results,
         relation_summary=relation_summary,
+        cross_check_results=cc_results,
+        cross_check_summary=cross_check_summary,
     )
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

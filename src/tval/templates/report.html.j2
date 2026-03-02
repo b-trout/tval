@@ -255,6 +255,58 @@
     </table>
   </div>
   {% endif %}
+
+  {# Cross-Table Checks #}
+  {% if cross_check_results %}
+  <div class="table-section">
+    <h2>
+      {% if cross_check_summary.ng > 0 %}
+        <span class="status-ng">&#x274C;</span>
+      {% else %}
+        <span class="status-ok">&#x2705;</span>
+      {% endif %}
+      Cross-Table Validation
+    </h2>
+    <div class="summary-grid" style="margin-bottom: 12px;">
+      <div class="summary-item">
+        <div class="label">Total Checks</div>
+        <div class="value">{{ cross_check_summary.total }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">OK</div>
+        <div class="value status-ok">{{ cross_check_summary.ok }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">NG</div>
+        <div class="value status-ng">{{ cross_check_summary.ng }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="label">Skipped</div>
+        <div class="value status-skipped">{{ cross_check_summary.skipped }}</div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Check</th><th>Status</th><th>Count</th><th>Message</th></tr>
+      </thead>
+      <tbody>
+        {% for cr in cross_check_results %}
+        <tr>
+          <td>{{ cr.description }}</td>
+          <td>
+            {% if cr.status == "OK" %}<span class="status-ok">&#x2705; OK</span>
+            {% elif cr.status == "NG" %}<span class="status-ng">&#x274C; NG</span>
+            {% elif cr.status == "ERROR" %}<span class="status-ng">&#x26D4; ERROR</span>
+            {% else %}<span class="status-skipped">&#x26A0;&#xFE0F; SKIPPED</span>{% endif %}
+          </td>
+          <td>{{ cr.result_count if cr.result_count is not none else "-" }}</td>
+          <td>{{ cr.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </div>
 </body>
 </html>

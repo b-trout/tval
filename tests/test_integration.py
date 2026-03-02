@@ -222,6 +222,49 @@ class TestIntegration:
         content = report.read_text(encoding="utf-8")
         assert "Relation Cardinality Validation" in content
 
+    def test_run_with_cross_checks(self, tmp_path: Path) -> None:
+        """Running tval with cross_checks should include Cross-Table Validation."""
+        config_path = _setup_project(tmp_path)
+        relations_data = {
+            "relations": [
+                {
+                    "name": "users-orders (1:N)",
+                    "cardinality": "1:N",
+                    "from": {"table": "users", "columns": ["user_id"]},
+                    "to": {"table": "orders", "columns": ["user_id"]},
+                }
+            ],
+            "cross_checks": [
+                {
+                    "name": "All order users must have email",
+                    "tables": ["users", "orders"],
+                    "query": (
+                        'SELECT COUNT(*) FROM "orders" o '
+                        'JOIN "users" u ON o."user_id" = u."user_id" '
+                        'WHERE u."email" IS NULL'
+                    ),
+                    "expect_zero": True,
+                }
+            ],
+        }
+        relations_path = tmp_path / "tval" / "relations.yaml"
+        relations_path.write_text(
+            yaml.dump(relations_data, allow_unicode=True),
+            encoding="utf-8",
+        )
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        config["relations_path"] = str(relations_path)
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True)
+
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        assert report.exists()
+        content = report.read_text(encoding="utf-8")
+        assert "Cross-Table Validation" in content
+        assert "All order users must have email" in content
+
     def test_run_with_check_ng_skips_profiling(self, tmp_path: Path) -> None:
         """Tables with check NG should have empty profiling results."""
         config_path = _setup_project(tmp_path)

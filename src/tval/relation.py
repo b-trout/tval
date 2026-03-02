@@ -11,7 +11,7 @@ from typing import Literal
 
 import duckdb
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from .builder import quote_identifier
 from .checker import CheckResult, make_skipped_result
@@ -39,21 +39,37 @@ class RelationDef(BaseModel):
     to: RelationEndpoint
 
 
+class CrossCheckDef(BaseModel):
+    """A user-defined SQL check that spans multiple tables."""
+
+    name: str
+    tables: list[str]
+    query: str
+    expect_zero: bool = True
+
+    @field_validator("tables")
+    @classmethod
+    def validate_tables_min_length(cls, v: list[str]) -> list[str]:
+        if len(v) < 2:
+            raise ValueError("cross_checks must reference at least 2 tables")
+        return v
+
+
 class RelationsConfig(BaseModel):
     """Top-level relations.yaml model."""
 
-    relations: list[RelationDef]
+    relations: list[RelationDef] = []
+    cross_checks: list[CrossCheckDef] = []
 
 
-def load_relations(path: str | Path) -> list[RelationDef]:
-    """Load relations.yaml and return validated RelationDef list."""
+def load_relations(path: str | Path) -> RelationsConfig:
+    """Load relations.yaml and return validated RelationsConfig."""
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     for rel in data.get("relations", []):
         if "from" in rel:
             rel["from_"] = rel.pop("from")
-    config = RelationsConfig.model_validate(data)
-    return config.relations
+    return RelationsConfig.model_validate(data)
 
 
 def validate_relation_refs(
@@ -82,6 +98,24 @@ def validate_relation_refs(
                         f"Relation '{rel.name}' references undefined column "
                         f"'{col}' in {label}.{endpoint.table}"
                     )
+
+
+def validate_cross_check_refs(
+    cross_checks: list[CrossCheckDef],
+    table_defs: list[TableDef],
+) -> None:
+    """Validate that all tables referenced in cross_checks exist in schema.
+
+    Raises:
+        ValueError: If a referenced table is not defined.
+    """
+    table_names = {tdef.table.name for tdef in table_defs}
+    for cc in cross_checks:
+        for table in cc.tables:
+            if table not in table_names:
+                raise ValueError(
+                    f"Cross-check '{cc.name}' references undefined table: {table}"
+                )
 
 
 def _build_uniqueness_sql(table: str, cols: list[str]) -> str:
@@ -297,4 +331,84 @@ def run_relation_checks(
                 )
 
     logger.info("Relation checks completed")
+    return results
+
+
+def run_cross_checks(
+    conn: duckdb.DuckDBPyConnection,
+    cross_checks: list[CrossCheckDef],
+    all_load_errors: dict[str, list[LoadError]],
+    check_failed_tables: set[str] | None = None,
+) -> list[CheckResult]:
+    """Run user-defined SQL checks that span multiple tables.
+
+    Each cross-check query must return a single scalar integer.
+    If expect_zero is True, result == 0 means OK; otherwise result > 0 means OK.
+    If any referenced table has load errors or check failures, the check is SKIPPED.
+    """
+    logger.info("Starting cross-table checks")
+    check_failed = check_failed_tables or set()
+    results: list[CheckResult] = []
+
+    for cc in cross_checks:
+        # Skip if any referenced table has errors
+        has_errors = any(all_load_errors.get(t, []) for t in cc.tables)
+        has_check_failures = any(t in check_failed for t in cc.tables)
+
+        if has_errors or has_check_failures:
+            skipped_tables = []
+            for t in cc.tables:
+                if all_load_errors.get(t, []):
+                    skipped_tables.append(t)
+                if t in check_failed:
+                    skipped_tables.append(f"{t} (check failed)")
+            skip_msg = f"Skipped due to errors in: {', '.join(skipped_tables)}"
+            check_def = CheckDef(description=f"[cross] {cc.name}", query=cc.query)
+            results.append(make_skipped_result(check_def, cc.tables[0], skip_msg))
+            continue
+
+        try:
+            row = conn.execute(cc.query).fetchone()
+            value = int(row[0]) if row else 0
+            if cc.expect_zero:
+                status = CheckStatus.OK if value == 0 else CheckStatus.NG
+            else:
+                status = CheckStatus.OK if value > 0 else CheckStatus.NG
+            message = "" if status == CheckStatus.OK else f"Result: {value}"
+            if status == CheckStatus.NG:
+                logger.error(
+                    "Cross-check failed",
+                    extra={
+                        "cross_check": cc.name,
+                        "result": value,
+                    },
+                )
+            results.append(
+                CheckResult(
+                    description=f"[cross] {cc.name}",
+                    query=cc.query,
+                    status=status,
+                    result_count=value,
+                    message=message,
+                )
+            )
+        except Exception as e:
+            logger.error(
+                "Cross-check execution error",
+                extra={
+                    "cross_check": cc.name,
+                    "error": str(e),
+                },
+            )
+            results.append(
+                CheckResult(
+                    description=f"[cross] {cc.name}",
+                    query=cc.query,
+                    status=CheckStatus.ERROR,
+                    result_count=None,
+                    message=str(e),
+                )
+            )
+
+    logger.info("Cross-table checks completed")
     return results
