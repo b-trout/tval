@@ -131,7 +131,30 @@ def _build_table_reports(
     return table_reports
 
 
-def run(config_path: str | None = None, export: bool = False) -> None:
+def _log_dry_run_summary(
+    ordered_defs: list[TableDef],
+    relations: list[RelationDef],
+) -> None:
+    """Log a summary of what would be validated in a full run."""
+    total_columns = sum(len(td.columns) for td in ordered_defs)
+    total_checks = sum(
+        len(td.table_constraints.checks) + len(td.table_constraints.row_conditions)
+        for td in ordered_defs
+    )
+    logger.info(
+        "Dry-run summary: %d table(s), %d column(s), %d check(s), %d relation(s)",
+        len(ordered_defs),
+        total_columns,
+        total_checks,
+        len(relations),
+    )
+
+
+def run(
+    config_path: str | None = None,
+    export: bool = False,
+    dry_run: bool = False,
+) -> None:
     """Run the full validation pipeline and generate an HTML report.
 
     Loads config, parses schemas, creates DuckDB tables, loads data files,
@@ -141,6 +164,7 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     Args:
         config_path: Path to config.yaml. Auto-discovered if None.
         export: If True, export validated tables to Parquet files.
+        dry_run: If True, validate config/schemas only without loading data.
 
     Raises:
         FileNotFoundError: If config.yaml or schema files are not found.
@@ -174,6 +198,12 @@ def run(config_path: str | None = None, export: bool = False) -> None:
 
     # Determine load order via DAG
     ordered_defs = build_load_order(table_defs)
+
+    if dry_run:
+        if export:
+            logger.warning("--export is ignored in dry-run mode")
+        _log_dry_run_summary(ordered_defs, relations)
+        return
 
     # Connect to DuckDB (delete and recreate existing file)
     if db_path.exists():

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
+import sys
 from itertools import chain
 from pathlib import Path
 from unittest.mock import patch
 
 import duckdb
+import pytest
 import yaml
 
 from tval.builder import build_load_order, create_tables
@@ -334,8 +337,6 @@ class TestP0ErrorResilience:
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, allow_unicode=True)
 
-        import pytest
-
         with pytest.raises(SystemExit) as exc_info:
             run(str(config_path))
         assert exc_info.value.code == 1
@@ -349,16 +350,12 @@ class TestP0ErrorResilience:
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, allow_unicode=True)
 
-        import pytest
-
         with pytest.raises(SystemExit) as exc_info:
             run(str(config_path))
         assert exc_info.value.code == 1
 
     def test_init_rollback_on_failure(self, tmp_path: Path) -> None:
         """Init should roll back created paths when mkdir fails partway."""
-        import pytest
-
         target = tmp_path / "myproject"
         call_count = 0
         original_mkdir = Path.mkdir
@@ -379,3 +376,49 @@ class TestP0ErrorResilience:
 
         # After rollback, nothing should remain
         assert not target.exists()
+
+
+class TestP1CLIExperience:
+    """P1: CLI experience tests."""
+
+    def test_version_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--version should print version and exit with code 0."""
+        from tval.cli import main
+
+        monkeypatch.setattr(sys, "argv", ["tval", "--version"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+
+    def test_quiet_sets_error_level(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--quiet should set tval loggers to ERROR level."""
+        from tval.cli import main
+
+        config_path = _setup_project(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["tval", "run", "--quiet", "--config", str(config_path)],
+        )
+        main()
+        tval_logger = logging.getLogger("tval.main")
+        assert tval_logger.level == logging.ERROR
+
+    def test_dry_run_no_duckdb_or_report(self, tmp_path: Path) -> None:
+        """--dry-run should not create .duckdb file or report.html."""
+        config_path = _setup_project(tmp_path)
+        run(str(config_path), dry_run=True)
+        db_file = tmp_path / "tval" / "work.duckdb"
+        report = tmp_path / "tval" / "output" / "report.html"
+        assert not db_file.exists()
+        assert not report.exists()
+
+    def test_dry_run_invalid_schema_errors(self, tmp_path: Path) -> None:
+        """--dry-run with invalid schema should raise an error."""
+        config_path = _setup_project(tmp_path)
+        schema_path = tmp_path / "tval" / "schema" / "users.yaml"
+        schema_path.write_text("invalid: yaml: content: [", encoding="utf-8")
+        with pytest.raises((yaml.YAMLError, KeyError, ValueError)):
+            run(str(config_path), dry_run=True)
