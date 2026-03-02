@@ -198,6 +198,8 @@ columns:
     logical_name: Amount
     type: DOUBLE
     not_null: true
+    min: 0                            # Minimum allowed value (numeric columns only)
+    max: 1000000                      # Maximum allowed value (numeric columns only)
 
   - name: status
     logical_name: Status
@@ -237,6 +239,11 @@ table_constraints:
       query: "SELECT COUNT(*) FROM {table} WHERE amount < 0"
       expect_zero: true            # true = pass when no rows match (i.e., no violations found)
 
+  # Declarative row-level conditions (auto-generates SQL checks)
+  row_conditions:
+    - description: Amount must not exceed 10x order_id
+      condition: "amount <= order_id * 10"
+
   # Aggregation-level validation rules (shown in a separate report section)
   aggregation_checks: []
 
@@ -255,6 +262,8 @@ export:
 | `not_null`       | `bool`     | Yes      | `true` = blank/missing values are not allowed           |
 | `description`    | `string`   | No       | Optional description                                    |
 | `allowed_values` | `string[]` | No       | List of accepted values; other values are flagged as NG |
+| `min`            | `number`   | No       | Minimum allowed value (numeric columns only). NULL values are excluded from check |
+| `max`            | `number`   | No       | Maximum allowed value (numeric columns only). Must be >= `min` if both specified |
 | `format`         | `string`   | No       | Expected date/time format (e.g. `"%Y-%m-%d"`) for DATE/TIMESTAMP/TIME columns |
 
 #### Table Constraints Reference
@@ -265,6 +274,7 @@ export:
 | `unique`             | Ensures a combination of columns has no duplicate values                   |
 | `foreign_keys`       | Ensures values in these columns exist in the referenced table (e.g. every `user_id` in orders must exist in the users table) |
 | `checks`             | Custom SQL queries to validate data (see below)                           |
+| `row_conditions`     | Declarative row-level conditions — each `condition` is a SQL boolean expression that must be true for every row |
 | `aggregation_checks` | Same as `checks`, but results appear in a separate section of the report  |
 
 #### User-Defined Checks
