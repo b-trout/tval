@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
+import sys
 from itertools import chain
 from pathlib import Path
 
 import duckdb
+import pytest
 import yaml
 
 from tval.builder import build_load_order, create_tables
@@ -318,3 +321,49 @@ class TestIntegration:
         report = tmp_path / "tval" / "output" / "report.html"
         content = report.read_text(encoding="utf-8")
         assert "EXTRA_COLUMNS" in content
+
+
+class TestP1CLIExperience:
+    """P1: CLI experience tests."""
+
+    def test_version_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--version should print version and exit with code 0."""
+        from tval.cli import main
+
+        monkeypatch.setattr(sys, "argv", ["tval", "--version"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+
+    def test_quiet_sets_error_level(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--quiet should set tval loggers to ERROR level."""
+        from tval.cli import main
+
+        config_path = _setup_project(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["tval", "run", "--quiet", "--config", str(config_path)],
+        )
+        main()
+        tval_logger = logging.getLogger("tval.main")
+        assert tval_logger.level == logging.ERROR
+
+    def test_dry_run_no_duckdb_or_report(self, tmp_path: Path) -> None:
+        """--dry-run should not create .duckdb file or report.html."""
+        config_path = _setup_project(tmp_path)
+        run(str(config_path), dry_run=True)
+        db_file = tmp_path / "tval" / "work.duckdb"
+        report = tmp_path / "tval" / "output" / "report.html"
+        assert not db_file.exists()
+        assert not report.exists()
+
+    def test_dry_run_invalid_schema_errors(self, tmp_path: Path) -> None:
+        """--dry-run with invalid schema should raise an error."""
+        config_path = _setup_project(tmp_path)
+        schema_path = tmp_path / "tval" / "schema" / "users.yaml"
+        schema_path.write_text("invalid: yaml: content: [", encoding="utf-8")
+        with pytest.raises((yaml.YAMLError, KeyError, ValueError)):
+            run(str(config_path), dry_run=True)

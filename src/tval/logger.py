@@ -57,6 +57,13 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(log, ensure_ascii=False)
 
 
+def configure_log_level(level: int) -> None:
+    """Set the log level on all tval loggers."""
+    for name in list(logging.Logger.manager.loggerDict):
+        if name == "tval" or name.startswith("tval."):
+            logging.getLogger(name).setLevel(level)
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a logger configured with JSON formatting."""
     logger = logging.getLogger(name)

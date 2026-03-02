@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import logging
+
+from . import __version__
+from .logger import configure_log_level
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tval",
         description="Table data validator",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
@@ -26,6 +35,17 @@ def main() -> None:
         action="store_true",
         help="Export to Parquet if all validations pass",
     )
+    run_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress all output except errors",
+    )
+    run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate config and schemas without loading data",
+    )
 
     args = parser.parse_args()
 
@@ -34,6 +54,9 @@ def main() -> None:
 
         run_init(args.dir)
     elif args.subcommand == "run":
+        if args.quiet:
+            configure_log_level(logging.ERROR)
+
         from .main import run
 
-        run(args.config, export=args.export)
+        run(args.config, export=args.export, dry_run=args.dry_run)
