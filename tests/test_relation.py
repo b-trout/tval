@@ -244,8 +244,6 @@ class TestRunRelationChecks:
         conn.execute('INSERT INTO "users" VALUES (1)')
         conn.execute('INSERT INTO "orders" VALUES (1)')
         rel = _make_relation("1:N", "users", ["user_id"], "orders", ["user_id"])
-        results = run_relation_checks(
-            conn, [rel], {}, check_failed_tables={"users"}
-        )
+        results = run_relation_checks(conn, [rel], {}, check_failed_tables={"users"})
         assert all(r.status == CheckStatus.SKIPPED for r in results)
         assert "check failed" in results[0].message

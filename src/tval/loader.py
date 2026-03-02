@@ -335,9 +335,7 @@ def _insert_file(
         elif ext == ".parquet":
             _insert_parquet(conn, tdef, resolved_path, select_clause)
         elif ext == ".xlsx":
-            _insert_xlsx(
-                conn, tdef, resolved_path, select_clause, columns_override
-            )
+            _insert_xlsx(conn, tdef, resolved_path, select_clause, columns_override)
         return None
     except EncodingDetectionError as e:
         logger.error(
