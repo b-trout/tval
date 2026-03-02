@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import shutil
+from itertools import chain
 from pathlib import Path
 
+import duckdb
 import yaml
 
-from tval.main import run
+from tval.loader import load_files
+from tval.main import _build_table_reports, run
+from tval.status import CheckStatus
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -210,3 +214,101 @@ class TestIntegration:
         assert report.exists()
         content = report.read_text(encoding="utf-8")
         assert "Relation Cardinality Validation" in content
+
+    def test_run_with_check_ng_skips_profiling(self, tmp_path: Path) -> None:
+        """Tables with check NG should have empty profiling results."""
+        config_path = _setup_project(tmp_path)
+        # Write data that violates allowed_values (status check) -> NG
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,1,100.0,invalid_status\n",
+            encoding="utf-8",
+        )
+        # Load and run checks/profiling manually to inspect table_reports
+        with open(config_path, encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f)
+
+        from tval.parser import ProjectConfig, load_table_definitions
+        from tval.builder import build_load_order, create_tables
+
+        config = ProjectConfig.model_validate(raw_config)
+        project_root = Path(config_path).resolve().parent
+        db_path = project_root / config.database_path
+        schema_dir = project_root / config.schema_dir
+
+        table_defs = load_table_definitions(str(schema_dir), project_root=project_root)
+        ordered_defs = build_load_order(table_defs)
+
+        if db_path.exists():
+            db_path.unlink()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with duckdb.connect(str(db_path)) as conn_rw:
+            create_tables(conn_rw, ordered_defs)
+            all_load_errors = {}
+            for tdef in ordered_defs:
+                all_load_errors[tdef.table.name] = load_files(conn_rw, tdef)
+
+        with duckdb.connect(str(db_path), read_only=True) as conn_ro:
+            table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
+
+        # Orders should have NG checks and empty profiles
+        orders_report = next(r for r in table_reports if r.table_def.table.name == "orders")
+        has_ng = any(
+            cr.status == CheckStatus.NG
+            for cr in chain(orders_report.check_results, orders_report.agg_check_results)
+        )
+        assert has_ng
+        assert orders_report.profiles == []
+
+        # Users should still have profiles (no check failures)
+        users_report = next(r for r in table_reports if r.table_def.table.name == "users")
+        assert users_report.profiles != []
+
+    def test_run_with_check_ng_skips_relation(self, tmp_path: Path) -> None:
+        """Relation checks should be SKIPPED when a related table has check NG."""
+        config_path = _setup_project(tmp_path)
+        # Write data that violates allowed_values -> check NG on orders
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status\n1,1,100.0,invalid_status\n",
+            encoding="utf-8",
+        )
+        # Add relations config
+        relations_data = {
+            "relations": [
+                {
+                    "name": "users-orders (1:N)",
+                    "cardinality": "1:N",
+                    "from": {"table": "users", "columns": ["user_id"]},
+                    "to": {"table": "orders", "columns": ["user_id"]},
+                }
+            ]
+        }
+        relations_path = tmp_path / "tval" / "relations.yaml"
+        relations_path.write_text(
+            yaml.dump(relations_data, allow_unicode=True),
+            encoding="utf-8",
+        )
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        config["relations_path"] = str(relations_path)
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True)
+
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "SKIPPED" in content
+
+    def test_run_with_extra_columns_csv(self, tmp_path: Path) -> None:
+        """CSV with extra columns should produce EXTRA_COLUMNS error in report."""
+        config_path = _setup_project(tmp_path)
+        orders_csv = tmp_path / "tval" / "data" / "orders" / "orders.csv"
+        orders_csv.write_text(
+            "order_id,user_id,amount,status,bonus\n1,1,100.0,pending,999\n",
+            encoding="utf-8",
+        )
+        run(str(config_path))
+        report = tmp_path / "tval" / "output" / "report.html"
+        content = report.read_text(encoding="utf-8")
+        assert "EXTRA_COLUMNS" in content

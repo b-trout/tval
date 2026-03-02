@@ -8,6 +8,7 @@ report generation.
 from __future__ import annotations
 
 from datetime import datetime
+from itertools import chain
 from pathlib import Path
 
 import duckdb
@@ -68,7 +69,17 @@ def _build_table_reports(
     for tdef in ordered_defs:
         load_errors = all_load_errors[tdef.table.name]
         check_results, agg_check_results = run_checks(conn, tdef, load_errors)
-        profiles = profile_table(conn, tdef, load_errors)
+
+        # Early termination: skip profiling if any check failed
+        has_check_failure = any(
+            cr.status in (CheckStatus.NG, CheckStatus.ERROR)
+            for cr in chain(check_results, agg_check_results)
+        )
+        if has_check_failure:
+            profiles = []
+        else:
+            profiles = profile_table(conn, tdef, load_errors)
+
         table_reports.append(
             TableReport(
                 table_def=tdef,
@@ -137,9 +148,20 @@ def run(config_path: str | None = None, export: bool = False) -> None:
     relation_check_results: list[CheckResult] = []
     with duckdb.connect(str(db_path), read_only=True) as conn_ro:
         table_reports = _build_table_reports(conn_ro, ordered_defs, all_load_errors)
+
+        # Collect tables with check failures for relation skip
+        check_failed_tables = {
+            r.table_def.table.name
+            for r in table_reports
+            if any(
+                cr.status in (CheckStatus.NG, CheckStatus.ERROR)
+                for cr in chain(r.check_results, r.agg_check_results)
+            )
+        }
+
         if relations:
             relation_check_results = run_relation_checks(
-                conn_ro, relations, all_load_errors
+                conn_ro, relations, all_load_errors, check_failed_tables
             )
 
     # Export
