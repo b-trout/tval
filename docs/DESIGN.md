@@ -254,6 +254,13 @@ columns:
     not_null: true
     description: システム採番の注文識別子
 
+  - name: amount
+    logical_name: 金額
+    type: DOUBLE
+    not_null: true
+    min: 0
+    max: 1000000
+
   - name: status
     logical_name: ステータス
     type: VARCHAR
@@ -280,6 +287,9 @@ table_constraints:
     - description: 合計は小計+税と一致すること
       query: "SELECT COUNT(*) FROM {table} WHERE total != sub_total + tax"
       expect_zero: true
+  row_conditions:
+    - description: 金額は注文IDの10倍以下であること
+      condition: "amount <= order_id * 10"
   aggregation_checks:
     - description: pendingステータスの比率は50%未満であること
       query: |
@@ -314,6 +324,8 @@ export:
 | `description` | string | ❌ | 補足説明。省略時は空文字列 |
 | `allowed_values` | string[] | ❌ | 許容値リスト。`checker.py`が自動でSQLに変換して検証 |
 | `format` | string | ❌ | DATE/TIMESTAMP/TIME型のフォーマット文字列。他型に指定時はValidationError |
+| `min` | float | ❌ | 数値型カラムの最小値。`checker.py`が自動でレンジチェックSQLを生成。非数値型に指定時はValidationError |
+| `max` | float | ❌ | 数値型カラムの最大値。`checker.py`が自動でレンジチェックSQLを生成。非数値型に指定時はValidationError |
 
 #### `table_constraints`（**必須**）
 
@@ -326,6 +338,7 @@ export:
 | `foreign_keys` | array | ✅ | `columns` + `references.table` + `references.columns`。制約なしの場合は`[]` |
 | `checks` | array | ✅ | `description` + `query`（`{table}`プレースホルダ） + `expect_zero`（デフォルトtrue） |
 | `aggregation_checks` | array | ✅ | checksと同一構造。レポート上で別セクションに表示される |
+| `row_conditions` | array | ❌ | `description` + `condition`（SQLブール式）。`checker.py`が`SELECT COUNT(*) FROM {table} WHERE NOT (condition)`を自動生成。省略時は空配列 |
 
 #### `export`（任意）
 
@@ -385,9 +398,10 @@ relations:
 
 | モデル | 主要フィールド | 説明 |
 |---|---|---|
-| `ColumnDef` | `name`, `logical_name`, `type`, `not_null`, `description`, `allowed_values`, `format` | カラム定義。`type`は自動大文字化 |
+| `ColumnDef` | `name`, `logical_name`, `type`, `not_null`, `description`, `allowed_values`, `format`, `min`, `max` | カラム定義。`type`は自動大文字化。`min`/`max`は数値型のみ |
 | `TableMeta` | `name`, `description`, `source_dir` | テーブルメタ情報。`source_dir`の存在確認・パストラバーサル防止あり |
-| `TableConstraints` | `primary_key`, `unique`, `foreign_keys`, `checks`, `aggregation_checks` | 全フィールド必須（空配列可） |
+| `TableConstraints` | `primary_key`, `unique`, `foreign_keys`, `checks`, `aggregation_checks`, `row_conditions` | 必須フィールド（空配列可）。`row_conditions`はデフォルト空 |
+| `RowConditionDef` | `description`, `condition` | 行レベル条件式。`condition`はSQLブール式 |
 | `CheckDef` | `description`, `query`, `expect_zero`(=True) | チェック定義。`params`フィールドも内部で使用 |
 | `TableDef` | `table`, `columns`, `table_constraints`, `export` | テーブル全体定義。`model_validator`でカラム参照整合性を検証 |
 | `ExportDef` | `partition_by`(=[]) | エクスポート設定 |
@@ -436,7 +450,9 @@ relations:
 - `load_table_definition(path, project_root)` → `TableDef`
 - `load_table_definitions(schema_dir, project_root)` → `list[TableDef]`（0件時は`FileNotFoundError`）
 
-**定数**: `DATETIME_TYPES = {"DATE", "TIMESTAMP", "TIME"}`（`loader.py`と共有）
+**定数**:
+- `DATETIME_TYPES = {"DATE", "TIMESTAMP", "TIME"}`（`loader.py`と共有）
+- `NUMERIC_TYPES`（INTEGER/BIGINT/SMALLINT等の数値型セット。`profiler.py`・`checker.py`と共有）
 
 ---
 
@@ -496,13 +512,17 @@ DuckDBのエラーメッセージはバージョンアップで変更される�
 - `make_skipped_result(check, table_name, message)` → `CheckResult`（`relation.py`からも使用）
 - `run_checks(conn, tdef, load_errors)` → `tuple[list[CheckResult], list[CheckResult]]`
 
+**定数**: `NUMERIC_TYPES`は`parser.py`で定義（`profiler.py`と共有）
+
 **動作**:
 1. `allowed_values`が指定されたカラムについて自動でSQLを生成・実行（`?`プレースホルダでバインド）
-2. `table_constraints.checks`を実行
-3. `table_constraints.aggregation_checks`を実行
-4. ロードエラーが1件以上ある場合は全チェックを`SKIPPED`
-5. `expect_zero=true`の場合: 結果が0件 → OK、1件以上 → NG
-6. SQLエラー発生時: `status=CheckStatus.ERROR`
+2. `min`/`max`が指定されたカラムについてレンジチェックSQLを自動生成・実行（NULL除外、`?`プレースホルダでバインド）
+3. `table_constraints.row_conditions`について`SELECT COUNT(*) FROM {table} WHERE NOT (condition)`を自動生成・実行
+4. `table_constraints.checks`を実行
+5. `table_constraints.aggregation_checks`を実行
+6. ロードエラーが1件以上ある場合は全チェックを`SKIPPED`
+7. `expect_zero=true`の場合: 結果が0件 → OK、1件以上 → NG
+8. SQLエラー発生時: `status=CheckStatus.ERROR`
 
 ---
 
