@@ -14,7 +14,7 @@ import duckdb
 from .builder import quote_identifier
 from .loader import LoadError
 from .logger import get_logger
-from .parser import CheckDef, ColumnDef, TableDef
+from .parser import CheckDef, ColumnDef, RowConditionDef, TableDef
 from .status import CheckStatus
 
 logger = get_logger(__name__)
@@ -64,6 +64,45 @@ def _build_allowed_values_check(table_name: str, col: ColumnDef) -> CheckDef:
         ),
         expect_zero=True,
         params=[col.allowed_values],
+    )
+
+
+def _build_range_check(table_name: str, col: ColumnDef) -> CheckDef:
+    """Build a CheckDef that verifies column values are within the min/max range."""
+    qcol = quote_identifier(col.name)
+    conditions: list[str] = []
+    params: list[float] = []
+    if col.min is not None:
+        conditions.append(f"{qcol} < ?")
+        params.append(col.min)
+    if col.max is not None:
+        conditions.append(f"{qcol} > ?")
+        params.append(col.max)
+    where_clause = " OR ".join(conditions)
+    range_parts: list[str] = []
+    if col.min is not None:
+        range_parts.append(f"min={col.min}")
+    if col.max is not None:
+        range_parts.append(f"max={col.max}")
+    return CheckDef(
+        description=(
+            f"{col.logical_name}({col.name}) range check ({', '.join(range_parts)})"
+        ),
+        query=(
+            f"SELECT COUNT(*) FROM {{table}} "
+            f"WHERE ({where_clause}) AND {qcol} IS NOT NULL"
+        ),
+        expect_zero=True,
+        params=params,
+    )
+
+
+def _build_row_condition_check(condition: RowConditionDef) -> CheckDef:
+    """Build a CheckDef from a declarative row-level condition."""
+    return CheckDef(
+        description=condition.description,
+        query=f"SELECT COUNT(*) FROM {{table}} WHERE NOT ({condition.condition})",
+        expect_zero=True,
     )
 
 
@@ -137,6 +176,15 @@ def run_checks(
                 for col in tdef.columns
                 if col.allowed_values
             ),
+            (
+                _build_range_check(table_name, col)
+                for col in tdef.columns
+                if col.min is not None or col.max is not None
+            ),
+            (
+                _build_row_condition_check(rc)
+                for rc in tdef.table_constraints.row_conditions
+            ),
             tdef.table_constraints.checks,
         )
         checks_results: list[CheckResult] = [
@@ -150,14 +198,28 @@ def run_checks(
         return checks_results, agg_results
 
     # Normal case: execute checks
-    checks_results = [
-        _execute_check(conn, _build_allowed_values_check(table_name, col), table_name)
-        for col in tdef.columns
-        if col.allowed_values
-    ] + [
-        _execute_check(conn, check, table_name)
-        for check in tdef.table_constraints.checks
-    ]
+    checks_results = (
+        [
+            _execute_check(
+                conn, _build_allowed_values_check(table_name, col), table_name
+            )
+            for col in tdef.columns
+            if col.allowed_values
+        ]
+        + [
+            _execute_check(conn, _build_range_check(table_name, col), table_name)
+            for col in tdef.columns
+            if col.min is not None or col.max is not None
+        ]
+        + [
+            _execute_check(conn, _build_row_condition_check(rc), table_name)
+            for rc in tdef.table_constraints.row_conditions
+        ]
+        + [
+            _execute_check(conn, check, table_name)
+            for check in tdef.table_constraints.checks
+        ]
+    )
 
     # 3. aggregation_checks
     agg_results = [
